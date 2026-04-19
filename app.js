@@ -9,6 +9,33 @@ const seededSetCatalog = [
 
 const seededSetColors = new Map(seededSetCatalog.map(set => [set.code, set.color]));
 const neutralSetColor = "linear-gradient(135deg, #64748b, #94a3b8)";
+const formatColors = {
+  Draft: "linear-gradient(135deg, #ff7a18, #ffb347)",
+  Sealed: "linear-gradient(135deg, #00a896, #7dd3fc)",
+  Mixed: "linear-gradient(135deg, #ff7a18, #7dd3fc)"
+};
+
+function getNormalizedFormat(format) {
+  return format === "Sealed" ? "Sealed" : "Draft";
+}
+
+function getFormatColor(format) {
+  return formatColors[getNormalizedFormat(format)] || formatColors.Draft;
+}
+
+function getEventColorForDate(dayEvents) {
+  const formats = [...new Set(dayEvents.map(event => getNormalizedFormat(event.format)))];
+
+  if (formats.length > 1) {
+    return formatColors.Mixed;
+  }
+
+  if (formats.length === 1) {
+    return getFormatColor(formats[0]);
+  }
+
+  return neutralSetColor;
+}
 
 function getInitialSetCatalog() {
   const preloadedSetCatalog = typeof window !== "undefined" && Array.isArray(window.preloadedSetCatalog)
@@ -147,8 +174,8 @@ const customLocations = [];
 const customOpponents = [];
 
 const events = [
-  { id: 1, date: "2026-04-19", set: "TDM", index: 1, location: "Fantasy Stronghold" },
-  { id: 2, date: "2026-04-19", set: "DFT", index: 1, location: "Sendepause" }
+  { id: 1, date: "2026-04-19", set: "TDM", index: 1, location: "Fantasy Stronghold", format: "Draft", rounds: 3, podCount: 1 },
+  { id: 2, date: "2026-04-19", set: "DFT", index: 1, location: "Sendepause", format: "Draft", rounds: 3, podCount: 1 }
 ];
 
 const eventPods = [];
@@ -156,13 +183,19 @@ const eventProfiles = [];
 const matchEntries = [];
 
 let currentDate = "";
+let currentCalendarMonth = "";
 let currentEventId = null;
 let currentMatchBack = "screen-date";
 let activeUserId = null;
+let currentSelectedRound = 1;
 let nextUserId = users.length + 1;
 let nextEventId = events.length + 1;
 let nextMatchId = 1;
 let currentScore = "2-0";
+let matchInteractionState = {
+  opponent: false,
+  score: false
+};
 
 const screens = {
   start: document.getElementById("screen-start"),
@@ -184,21 +217,30 @@ const elements = {
   createUserButton: document.getElementById("create-user-button"),
   userAlert: document.getElementById("user-alert"),
   dateInput: document.getElementById("event-date"),
+  calendarTodayButton: document.getElementById("calendar-today-button"),
+  calendarPrevButton: document.getElementById("calendar-prev-button"),
+  calendarNextButton: document.getElementById("calendar-next-button"),
+  calendarMonthLabel: document.getElementById("calendar-month-label"),
+  calendarGrid: document.getElementById("calendar-grid"),
+  selectedDateLabel: document.getElementById("selected-date-label"),
   dateEventList: document.getElementById("date-event-list"),
   dateEventEmpty: document.getElementById("date-event-empty"),
   dateEventCount: document.getElementById("date-event-count"),
   createEventButton: document.getElementById("create-event-button"),
   selectedDatePill: document.getElementById("selected-date-pill"),
-  duplicateAlert: document.getElementById("duplicate-alert"),
-  eventForm: document.getElementById("event-form"),
-  setSelect: document.getElementById("set-select"),
-  locationSelect: document.getElementById("location-select"),
+    duplicateAlert: document.getElementById("duplicate-alert"),
+    eventForm: document.getElementById("event-form"),
+    setSelect: document.getElementById("set-select"),
+    eventFormatSelect: document.getElementById("event-format-select"),
+    eventRoundsInput: document.getElementById("event-rounds-input"),
+    locationSelect: document.getElementById("location-select"),
   podCountInput: document.getElementById("pod-count-input"),
   newLocationInput: document.getElementById("new-location-input"),
   createLocationButton: document.getElementById("create-location-button"),
-  matchBackButton: document.getElementById("match-back-button"),
-  currentEventBanner: document.getElementById("current-event-banner"),
-  podSelect: document.getElementById("pod-select"),
+    matchBackButton: document.getElementById("match-back-button"),
+    currentEventBanner: document.getElementById("current-event-banner"),
+    matchRoundNav: document.getElementById("match-round-nav"),
+    podSelect: document.getElementById("pod-select"),
   deckColorSelect: document.getElementById("deck-color-select"),
   archetypeSelect: document.getElementById("archetype-select"),
   matchAlert: document.getElementById("match-alert"),
@@ -233,11 +275,13 @@ function init() {
   populateArchetypeSelect();
   initializeEnhancedSelects();
   setDateInputToToday();
+  setCalendarMonthFromDate(elements.dateInput.value);
+  renderCalendar();
   syncDateView(elements.dateInput.value);
   loadSetCatalogFromScryfall();
   loadManaSymbolCatalogFromScryfall();
 
-  [elements.activeUserSelect, elements.locationSelect, elements.podSelect, elements.archetypeSelect, elements.opponentSelect].forEach(wireSelectCaret);
+  [elements.activeUserSelect, elements.eventFormatSelect, elements.locationSelect, elements.podSelect, elements.archetypeSelect, elements.opponentSelect].forEach(wireSelectCaret);
 
   elements.trackButton.addEventListener("click", handleTrackStart);
   elements.globalStatsButton.addEventListener("click", () => openGlobalStats("screen-start"));
@@ -246,8 +290,10 @@ function init() {
   elements.activeUserSelect.addEventListener("change", handleActiveUserChange);
   elements.createUserButton.addEventListener("click", handleCreateUser);
   elements.newUserInput.addEventListener("keydown", handleEnterToCreateUser);
-  elements.dateInput.addEventListener("focus", setDateInputToToday);
-  elements.dateInput.addEventListener("input", () => syncDateView(elements.dateInput.value));
+  elements.calendarTodayButton.addEventListener("click", handleCalendarToday);
+  elements.calendarPrevButton.addEventListener("click", () => shiftCalendarMonth(-1));
+  elements.calendarNextButton.addEventListener("click", () => shiftCalendarMonth(1));
+  elements.eventFormatSelect.addEventListener("change", handleEventFormatChange);
   elements.createEventButton.addEventListener("click", enterDetailsStep);
   elements.eventForm.addEventListener("submit", handleSaveEvent);
   elements.setSelect.addEventListener("change", () => {
@@ -261,7 +307,10 @@ function init() {
   elements.podSelect.addEventListener("change", saveCurrentProfile);
   elements.deckColorSelect.addEventListener("change", saveCurrentProfile);
   elements.archetypeSelect.addEventListener("change", saveCurrentProfile);
-  elements.matchForm.addEventListener("submit", handleSaveMatch);
+  elements.matchForm.addEventListener("submit", event => event.preventDefault());
+  elements.opponentSelect.addEventListener("change", handleOpponentSelectionChange);
+  elements.matchNotesInput.addEventListener("input", handleMatchNotesInput);
+  elements.saveMatchButton.addEventListener("click", handleDoneWithMatch);
   elements.scoreRow.addEventListener("click", handleScoreClick);
 
   elements.locationSelect.addEventListener("input", updatePotentialDuplicateNotice);
@@ -442,9 +491,10 @@ function handleTrackStart() {
   }
 
   setDateInputToToday();
+  setCalendarMonthFromDate(elements.dateInput.value);
+  renderCalendar();
   syncDateView(elements.dateInput.value);
   showScreen("date");
-  elements.dateInput.focus();
 }
 
 function handleActiveUserChange() {
@@ -508,6 +558,11 @@ function handleCreateLocation() {
   updatePotentialDuplicateNotice();
 }
 
+function handleEventFormatChange() {
+  const defaultRounds = elements.eventFormatSelect.value === "Sealed" ? 6 : 3;
+  elements.eventRoundsInput.value = String(defaultRounds);
+}
+
 function handleCreateOpponent() {
   const trimmedOpponent = elements.newOpponentInput.value.trim();
   if (!trimmedOpponent) {
@@ -532,6 +587,7 @@ function handleCreateOpponent() {
   populateOpponentSelect(`named:${selectedName}`);
   elements.newOpponentInput.value = "";
   hideMatchAlert();
+  handleOpponentSelectionChange();
 }
 
 function handleEnterToCreateLocation(event) {
@@ -555,7 +611,40 @@ function handleScoreClick(event) {
   }
 
   currentScore = target.dataset.score;
+  matchInteractionState.score = true;
   updateScoreUi();
+  attemptAutosaveCurrentRound();
+}
+
+function handleOpponentSelectionChange() {
+  matchInteractionState.opponent = true;
+  attemptAutosaveCurrentRound();
+}
+
+function handleMatchNotesInput() {
+  attemptAutosaveCurrentRound();
+}
+
+function handleDoneWithMatch() {
+  if (areAllRoundsLogged()) {
+    showScreen("start");
+    return;
+  }
+
+  attemptAutosaveCurrentRound({ force: true });
+  if (areAllRoundsLogged()) {
+    renderCurrentEventBanner();
+    renderMatchRoundNav();
+    loadMatchForSelectedRound();
+    return;
+  }
+
+  const nextRound = getNextUnloggedRound();
+  if (nextRound) {
+    currentSelectedRound = nextRound;
+    renderMatchRoundNav();
+    loadMatchForSelectedRound();
+  }
 }
 
 function handleSaveEvent(event) {
@@ -563,11 +652,13 @@ function handleSaveEvent(event) {
 
   const date = currentDate || elements.dateInput.value;
   const set = elements.setSelect.value;
+  const format = elements.eventFormatSelect.value;
+  const rounds = Number(elements.eventRoundsInput.value);
   const location = elements.locationSelect.value.trim();
   const podCount = Number(elements.podCountInput.value);
 
-  if (!date || !set || !location || !Number.isInteger(podCount) || podCount < 1) {
-    showDuplicateAlert("Set, location, and a valid pod count are required.");
+  if (!date || !set || !format || !location || !Number.isInteger(rounds) || rounds < 1 || !Number.isInteger(podCount) || podCount < 1) {
+    showDuplicateAlert("Set, format, rounds, location, and a valid pod count are required.");
     return;
   }
 
@@ -589,6 +680,8 @@ function handleSaveEvent(event) {
     date,
     set,
     index: nextIndex,
+    format,
+    rounds,
     location,
     podCount
   };
@@ -603,34 +696,44 @@ function handleSaveEvent(event) {
   showScreen("match");
 }
 
-function handleSaveMatch(event) {
-  event.preventDefault();
+function attemptAutosaveCurrentRound(options = {}) {
+  const { force = false } = options;
   if (!currentEventId || !activeUserId) {
-    return;
+    return false;
   }
 
   hideMatchAlert();
   saveCurrentProfile();
 
-  const opponent = getOpponentPayload();
+  const existingMatch = getMatchForCurrentRound();
+  const opponent = getOpponentPayload({ silent: true });
   if (!opponent) {
-    return;
+    return false;
   }
 
   const selectedPod = elements.podSelect.value;
   if (!selectedPod) {
-    showMatchAlert("Select a pod before saving.");
-    return;
+    return false;
   }
 
   const score = currentScore;
   if (!score) {
-    showMatchAlert("Select a score before saving.");
-    return;
+    return false;
+  }
+
+  const currentEvent = getCurrentEvent();
+  const totalRounds = currentEvent?.rounds || 3;
+  const round = currentSelectedRound;
+  if (!Number.isInteger(round) || round < 1 || round > totalRounds) {
+    return false;
+  }
+
+  const hasIntentToSave = force || Boolean(existingMatch) || matchInteractionState.opponent || matchInteractionState.score || Boolean(elements.matchNotesInput.value.trim());
+  if (!hasIntentToSave) {
+    return false;
   }
 
   const result = inferResultFromScore(score);
-  const round = getNextRoundSuggestion();
 
   const profile = getOrCreateEventProfile(currentEventId, activeUserId);
 
@@ -649,21 +752,37 @@ function handleSaveMatch(event) {
     notes: elements.matchNotesInput.value.trim()
   };
 
-  matchEntries.push({
-    id: nextMatchId++,
-    ...payload
-  });
+  const existingMatchIndex = matchEntries.findIndex(entry =>
+    entry.eventId === currentEventId &&
+    entry.userId === activeUserId &&
+    entry.round === round
+  );
+
+  if (existingMatchIndex !== -1) {
+    matchEntries[existingMatchIndex] = {
+      ...matchEntries[existingMatchIndex],
+      ...payload
+    };
+  } else {
+    matchEntries.push({
+      id: nextMatchId++,
+      ...payload
+    });
+  }
 
   renderCurrentEventBanner();
-  resetMatchForm();
-  window.alert("Match saved.");
-  showScreen("start");
+  renderMatchRoundNav();
+  updateMatchActionButton();
+  return true;
 }
 
-function getOpponentPayload() {
+function getOpponentPayload(options = {}) {
+  const { silent = false } = options;
   const selectedOpponent = elements.opponentSelect.value;
   if (!selectedOpponent) {
-    showMatchAlert("Select an opponent before saving.");
+    if (!silent) {
+      showMatchAlert("Select an opponent before saving.");
+    }
     return null;
   }
 
@@ -678,7 +797,9 @@ function getOpponentPayload() {
   if (selectedOpponent.startsWith("user:")) {
     const opponentUserId = Number(selectedOpponent.slice(5));
     if (opponentUserId === activeUserId) {
-      showMatchAlert("You cannot log yourself as the opponent.");
+      if (!silent) {
+        showMatchAlert("You cannot log yourself as the opponent.");
+      }
       return null;
     }
 
@@ -697,13 +818,17 @@ function getOpponentPayload() {
   };
 }
 
-function resetMatchForm() {
+function resetMatchForm(keepOpponentSelection = false) {
   currentScore = "2-0";
-  populateOpponentSelect("npc");
+  matchInteractionState = {
+    opponent: false,
+    score: false
+  };
+  populateOpponentSelect(keepOpponentSelection ? elements.opponentSelect.value : "npc");
   elements.newOpponentInput.value = "";
   elements.matchNotesInput.value = "";
   updateScoreUi();
-  elements.saveMatchButton.textContent = "Save match";
+  updateMatchActionButton();
   hideMatchAlert();
 }
 
@@ -910,7 +1035,66 @@ function showScreenById(id) {
 
 function syncDateView(date) {
   currentDate = date;
+  elements.dateInput.value = date;
+  updateSelectedDateLabel(date);
+  renderCalendar();
   renderDateEvents(date);
+}
+
+function renderCalendar() {
+  if (!currentCalendarMonth) {
+    currentCalendarMonth = getMonthStartIso(currentDate || elements.dateInput.value || getTodayIsoLocal());
+  }
+
+  const monthDate = parseIsoDate(currentCalendarMonth);
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstOfMonth = new Date(year, month, 1, 12);
+  const firstWeekday = (firstOfMonth.getDay() + 6) % 7;
+  const gridStart = new Date(year, month, 1 - firstWeekday, 12);
+  const today = getTodayIsoLocal();
+
+  elements.calendarMonthLabel.textContent = new Intl.DateTimeFormat("en-GB", {
+    month: "long",
+    year: "numeric"
+  }).format(monthDate);
+
+  elements.calendarGrid.innerHTML = "";
+
+  for (let index = 0; index < 42; index += 1) {
+    const cellDate = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + index, 12);
+    const iso = formatDateAsIso(cellDate);
+    const dayEvents = getEventsOnDate(iso);
+    const eventCount = dayEvents.length;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "calendar-day";
+    button.textContent = String(cellDate.getDate());
+
+    if (cellDate.getMonth() !== month) {
+      button.classList.add("is-outside");
+    }
+    if (iso === currentDate) {
+      button.classList.add("is-selected");
+    }
+    if (iso === today) {
+      button.classList.add("is-today");
+    }
+    if (eventCount > 0) {
+      button.classList.add("has-events");
+      button.dataset.eventCount = String(eventCount);
+      button.style.setProperty("--calendar-event-accent", getEventColorForDate(dayEvents));
+    }
+
+    button.addEventListener("click", () => {
+      if (cellDate.getMonth() !== month) {
+        currentCalendarMonth = getMonthStartIso(iso);
+      }
+      syncDateView(iso);
+    });
+
+    elements.calendarGrid.appendChild(button);
+  }
 }
 
 function renderDateEvents(date) {
@@ -926,23 +1110,35 @@ function renderDateEvents(date) {
 
     const button = document.createElement("button");
     button.type = "button";
+    button.style.setProperty("--event-format-accent", getFormatColor(event.format));
     button.innerHTML = `
-      <div class="list-title-row">
-        <div>
-          <div class="fw-bold">${formatCompactEventLabel(event)}</div>
-          <div class="small text-secondary mt-1">${set ? set.name : event.set}</div>
+        <div class="list-title-row">
+          <div>
+              <div class="fw-bold">${formatCompactEventLabel(event)}</div>
+              <div class="small text-secondary mt-1">${set ? set.name : event.set} · ${event.format || "Draft"} · ${event.rounds || 3} rounds</div>
+          </div>
+          <div class="set-badge" style="background:${getFormatColor(event.format)}">${event.set}</div>
         </div>
-        <div class="set-badge" style="background:${set ? set.color : "linear-gradient(135deg, #64748b, #94a3b8)"}">${event.set}</div>
-      </div>
-      <div class="event-meta">
-        <span class="meta-pill">${event.location}</span>
-      </div>
-    `;
+      `;
 
     button.addEventListener("click", () => chooseExistingEvent(event.id));
     wrapper.appendChild(button);
     elements.dateEventList.appendChild(wrapper);
   });
+}
+
+function handleCalendarToday() {
+  const today = getTodayIsoLocal();
+  setDateInputToToday();
+  setCalendarMonthFromDate(today);
+  syncDateView(today);
+}
+
+function shiftCalendarMonth(delta) {
+  const monthDate = parseIsoDate(currentCalendarMonth || getMonthStartIso(currentDate || getTodayIsoLocal()));
+  const shifted = new Date(monthDate.getFullYear(), monthDate.getMonth() + delta, 1, 12);
+  currentCalendarMonth = formatDateAsIso(shifted);
+  renderCalendar();
 }
 
 function enterDetailsStep() {
@@ -959,16 +1155,18 @@ function enterDetailsStep() {
 }
 
 function resetEventForm() {
-  if (enhancedSelects.set) {
-    enhancedSelects.set.setValue("", true);
-  } else {
-    elements.setSelect.value = "";
-  }
-  populateLocationSelect();
-  elements.podCountInput.value = "1";
-  elements.newLocationInput.value = "";
-  updateSetPreview();
-  hideDuplicateAlert();
+    if (enhancedSelects.set) {
+      enhancedSelects.set.setValue("", true);
+    } else {
+      elements.setSelect.value = "";
+    }
+  elements.eventFormatSelect.value = "Draft";
+  elements.eventRoundsInput.value = "3";
+    populateLocationSelect();
+    elements.podCountInput.value = "1";
+    elements.newLocationInput.value = "";
+    updateSetPreview();
+    hideDuplicateAlert();
 }
 
 function chooseExistingEvent(eventId) {
@@ -991,8 +1189,10 @@ function renderMatchScreen() {
   populateDeckColorSelect(profile.deckColors);
   populateArchetypeSelect(profile.archetype);
   populateOpponentSelect();
+  selectBestNextRound();
   renderCurrentEventBanner();
-  resetMatchForm();
+  renderMatchRoundNav();
+  loadMatchForSelectedRound();
 }
 
 function saveCurrentProfile() {
@@ -1015,18 +1215,160 @@ function renderCurrentEventBanner() {
   const set = getSet(event.set);
   const duplicateSeries = getMatchingEvents(event.date, event.set, event.location).length > 1;
   const podLabels = getPodsForEvent(event.id);
+  const loggedRounds = getMatchesForCurrentPlayerEvent().length;
+  const format = event.format || "Draft";
+  const subtitleParts = [];
+
+  if (duplicateSeries) {
+    subtitleParts.push(`Event ${event.index}`);
+  }
 
   elements.currentEventBanner.innerHTML = `
     <div class="compact-banner">
-      <div class="compact-banner-title">${event.set}${set ? ` - ${set.name}` : ""}${duplicateSeries ? ` - Event ${event.index}` : ""}</div>
+      <div class="compact-banner-heading">
+        <div class="compact-banner-title">${format} - ${event.set}${set ? ` - ${set.name}` : ""}</div>
+        <div class="compact-banner-date">${formatDate(event.date)}</div>
+      </div>
+      ${subtitleParts.length ? `<div class="compact-banner-subtitle">${subtitleParts.join(" - ")}</div>` : ""}
       <div class="event-meta compact-banner-meta">
         <span class="meta-pill">${getActiveUserName()}</span>
-        <span class="meta-pill">${formatDate(event.date)}</span>
         <span class="meta-pill">${event.location}</span>
+        <span class="meta-pill">${loggedRounds}/${event.rounds || 3} rounds</span>
         <span class="meta-pill">${podLabels.length} pod${podLabels.length === 1 ? "" : "s"}</span>
       </div>
     </div>
   `;
+}
+
+function renderMatchRoundNav() {
+  const event = getCurrentEvent();
+  if (!event) {
+    elements.matchRoundNav.innerHTML = "";
+    return;
+  }
+
+  const totalRounds = event.rounds || 3;
+  const loggedRounds = new Set(getMatchesForCurrentPlayerEvent().map(entry => entry.round));
+  const allRoundsComplete = loggedRounds.size >= totalRounds;
+
+  elements.matchRoundNav.innerHTML = "";
+  for (let round = 1; round <= totalRounds; round += 1) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "round-chip";
+    button.textContent = String(round);
+    if (round === currentSelectedRound) {
+      button.classList.add("is-active");
+    }
+    if (loggedRounds.has(round)) {
+      button.classList.add("is-complete");
+    }
+    if (allRoundsComplete) {
+      button.classList.add("is-all-complete");
+    }
+
+    button.addEventListener("click", () => {
+      currentSelectedRound = round;
+      renderMatchRoundNav();
+      loadMatchForSelectedRound();
+    });
+
+    elements.matchRoundNav.appendChild(button);
+  }
+}
+
+function loadMatchForSelectedRound() {
+  const existingMatch = getMatchForCurrentRound();
+  if (!existingMatch) {
+    resetMatchForm();
+    return;
+  }
+
+  currentScore = existingMatch.score || "2-0";
+  matchInteractionState = {
+    opponent: true,
+    score: true
+  };
+  populateOpponentSelect(getOpponentSelectValue(existingMatch));
+  elements.newOpponentInput.value = "";
+  elements.matchNotesInput.value = existingMatch.notes || "";
+  updateMatchActionButton();
+  updateScoreUi();
+  hideMatchAlert();
+}
+
+function selectBestNextRound() {
+  const event = getCurrentEvent();
+  if (!event) {
+    currentSelectedRound = 1;
+    return;
+  }
+
+  const totalRounds = event.rounds || 3;
+  const loggedRounds = new Set(getMatchesForCurrentPlayerEvent().map(entry => entry.round));
+  for (let round = 1; round <= totalRounds; round += 1) {
+    if (!loggedRounds.has(round)) {
+      currentSelectedRound = round;
+      return;
+    }
+  }
+  currentSelectedRound = totalRounds;
+}
+
+function getNextUnloggedRound() {
+  const event = getCurrentEvent();
+  if (!event) {
+    return null;
+  }
+
+  const totalRounds = event.rounds || 3;
+  const loggedRounds = new Set(getMatchesForCurrentPlayerEvent().map(entry => entry.round));
+  for (let round = 1; round <= totalRounds; round += 1) {
+    if (!loggedRounds.has(round)) {
+      return round;
+    }
+  }
+
+  return null;
+}
+
+function areAllRoundsLogged() {
+  const event = getCurrentEvent();
+  if (!event) {
+    return false;
+  }
+
+  return getMatchesForCurrentPlayerEvent().length >= (event.rounds || 3);
+}
+
+function updateMatchActionButton() {
+  if (areAllRoundsLogged()) {
+    elements.saveMatchButton.textContent = "Done";
+    return;
+  }
+
+  elements.saveMatchButton.textContent = `Save round ${currentSelectedRound}`;
+}
+
+function getMatchForCurrentRound() {
+  return matchEntries.find(entry =>
+    entry.eventId === currentEventId &&
+    entry.userId === activeUserId &&
+    entry.round === currentSelectedRound
+  ) || null;
+}
+
+function getOpponentSelectValue(matchEntry) {
+  if (!matchEntry) {
+    return "npc";
+  }
+  if (matchEntry.opponentKind === "tracked" && matchEntry.opponentUserId) {
+    return `user:${matchEntry.opponentUserId}`;
+  }
+  if (matchEntry.opponentKind === "named" && matchEntry.opponentName) {
+    return `named:${matchEntry.opponentName}`;
+  }
+  return "npc";
 }
 
 function updateScoreUi() {
@@ -1685,7 +2027,9 @@ function getPodsForEvent(eventId) {
 function ensureDefaultPod(eventId) {
   const hasPod = eventPods.some(entry => entry.eventId === eventId);
   if (!hasPod) {
-    eventPods.push({ eventId, label: "Pod 1" });
+    const event = events.find(item => item.id === eventId);
+    const podCount = event?.podCount || 1;
+    seedPodsForEvent(eventId, podCount);
   }
 }
 
@@ -1881,6 +2225,13 @@ function formatPodShortLabel(label) {
 }
 
 function parseScore(score) {
+  if (score === "BYE") {
+    return {
+      won: 2,
+      lost: 0
+    };
+  }
+
   const parts = score.split("-").map(part => Number(part));
   return {
     won: parts[0] || 0,
@@ -1889,8 +2240,8 @@ function parseScore(score) {
 }
 
 function inferResultFromScore(score) {
-  if (score === "1-1-1") {
-    return "draw";
+  if (score === "BYE") {
+    return "win";
   }
 
   const parsed = parseScore(score);
@@ -1975,6 +2326,31 @@ function updatePotentialDuplicateNotice() {
 
 function setDateInputToToday() {
   elements.dateInput.value = getTodayIsoLocal();
+}
+
+function setCalendarMonthFromDate(dateString) {
+  currentCalendarMonth = getMonthStartIso(dateString || getTodayIsoLocal());
+}
+
+function getMonthStartIso(dateString) {
+  const date = parseIsoDate(dateString);
+  return formatDateAsIso(new Date(date.getFullYear(), date.getMonth(), 1, 12));
+}
+
+function parseIsoDate(dateString) {
+  return new Date(`${dateString}T12:00:00`);
+}
+
+function formatDateAsIso(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function updateSelectedDateLabel(dateString) {
+  const count = getEventsOnDate(dateString).length;
+  elements.selectedDateLabel.textContent = `${formatDate(dateString)}${count ? ` - ${count} event${count === 1 ? "" : "s"}` : ""}`;
 }
 
 function getTodayIsoLocal() {
