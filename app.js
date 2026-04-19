@@ -112,15 +112,14 @@ const archetypeOptions = [
   "Control",
   "Tempo",
   "Ramp",
+  "Flyers",
   "Tribal",
-  "Artifacts",
-  "Enchantments",
   "Go-Wide",
-  "Goodstuff",
+  "Value",
   "Reanimator",
   "Tokens",
   "Sacrifice",
-  "Spells"
+  "Spellslinger"
 ];
 
 const users = [
@@ -170,12 +169,16 @@ const screens = {
   date: document.getElementById("screen-date"),
   details: document.getElementById("screen-details"),
   match: document.getElementById("screen-match"),
-  stats: document.getElementById("screen-stats")
+  stats: document.getElementById("screen-stats"),
+  friendsStats: document.getElementById("screen-friends-stats"),
+  personalStats: document.getElementById("screen-personal-stats")
 };
 
 const elements = {
   trackButton: document.getElementById("track-button"),
-  statsButton: document.getElementById("stats-button"),
+  globalStatsButton: document.getElementById("global-stats-button"),
+  friendsStatsButton: document.getElementById("friends-stats-button"),
+  personalStatsButton: document.getElementById("personal-stats-button"),
   activeUserSelect: document.getElementById("active-user-select"),
   newUserInput: document.getElementById("new-user-input"),
   createUserButton: document.getElementById("create-user-button"),
@@ -209,11 +212,17 @@ const elements = {
   statsBackButton: document.getElementById("stats-back-button"),
   statsSubtitle: document.getElementById("stats-subtitle"),
   statsOverviewGrid: document.getElementById("stats-overview-grid"),
-  statsPersonal: document.getElementById("stats-personal"),
   statsLeaderboard: document.getElementById("stats-leaderboard"),
-  statsHeadToHead: document.getElementById("stats-head-to-head"),
-  statsRivalries: document.getElementById("stats-rivalries"),
-  statsHistory: document.getElementById("stats-history")
+  friendsStatsBackButton: document.getElementById("friends-stats-back-button"),
+  friendsStatsSubtitle: document.getElementById("friends-stats-subtitle"),
+  friendsOverviewGrid: document.getElementById("friends-overview-grid"),
+  friendsLeaderboard: document.getElementById("friends-leaderboard"),
+  friendsRivalries: document.getElementById("friends-rivalries"),
+  statsHistory: document.getElementById("stats-history"),
+  statsPersonal: document.getElementById("stats-personal"),
+  personalHeadToHead: document.getElementById("personal-head-to-head"),
+  personalStatsBackButton: document.getElementById("personal-stats-back-button"),
+  personalStatsSubtitle: document.getElementById("personal-stats-subtitle")
 };
 
 function init() {
@@ -231,7 +240,9 @@ function init() {
   [elements.activeUserSelect, elements.locationSelect, elements.podSelect, elements.archetypeSelect, elements.opponentSelect].forEach(wireSelectCaret);
 
   elements.trackButton.addEventListener("click", handleTrackStart);
-  elements.statsButton.addEventListener("click", () => openStats("screen-start"));
+  elements.globalStatsButton.addEventListener("click", () => openGlobalStats("screen-start"));
+  elements.friendsStatsButton.addEventListener("click", () => openFriendsStats("screen-start"));
+  elements.personalStatsButton.addEventListener("click", () => openPersonalStats("screen-start"));
   elements.activeUserSelect.addEventListener("change", handleActiveUserChange);
   elements.createUserButton.addEventListener("click", handleCreateUser);
   elements.newUserInput.addEventListener("keydown", handleEnterToCreateUser);
@@ -257,6 +268,19 @@ function init() {
 
   document.querySelectorAll("[data-back]").forEach(button => {
     button.addEventListener("click", () => showScreenById(button.dataset.back));
+  });
+
+  document.querySelectorAll("[data-stats-view]").forEach(button => {
+    button.addEventListener("click", () => {
+      const target = button.dataset.statsView;
+      if (target === "global") {
+        openGlobalStats("screen-start");
+      } else if (target === "friends") {
+        openFriendsStats("screen-start");
+      } else if (target === "personal") {
+        openPersonalStats("screen-start");
+      }
+    });
   });
 
   updateScoreUi();
@@ -632,6 +656,8 @@ function handleSaveMatch(event) {
 
   renderCurrentEventBanner();
   resetMatchForm();
+  window.alert("Match saved.");
+  showScreen("start");
 }
 
 function getOpponentPayload() {
@@ -1009,25 +1035,50 @@ function updateScoreUi() {
   });
 }
 
-function openStats(backId) {
+function openGlobalStats(backId) {
   if (!activeUserId) {
     showUserAlert("Select a user first.");
     return;
   }
 
   elements.statsBackButton.dataset.back = backId;
-  renderStats();
+  renderGlobalStats();
   showScreen("stats");
 }
 
-function renderStats() {
-  const personalEntries = matchEntries.filter(entry => entry.userId === activeUserId);
+function openStats(backId) {
+  openGlobalStats(backId);
+}
+
+function openFriendsStats(backId) {
+  if (!activeUserId) {
+    showUserAlert("Select a user first.");
+    return;
+  }
+
+  elements.friendsStatsBackButton.dataset.back = backId;
+  renderFriendsStats();
+  showScreen("friendsStats");
+}
+
+function openPersonalStats(backId) {
+  if (!activeUserId) {
+    showUserAlert("Select a user first.");
+    return;
+  }
+
+  elements.personalStatsBackButton.dataset.back = backId;
+  renderPersonalStatsPage();
+  showScreen("personalStats");
+}
+
+function renderGlobalStats() {
   const canonicalFriendMatches = buildCanonicalFriendMatches();
   const activeUsersWithMatches = users.filter(user => matchEntries.some(entry => entry.userId === user.id));
   const eventIdsWithMatches = [...new Set(matchEntries.map(entry => entry.eventId))];
   const mostPlayedSet = getMostPlayedSet();
 
-  elements.statsSubtitle.textContent = `All-time numbers for the group and personal stats for ${getActiveUserName()}.`;
+  elements.statsSubtitle.textContent = "All-time numbers for the whole group.";
   elements.statsOverviewGrid.innerHTML = [
     createStatTile(matchEntries.length, "matches logged"),
     createStatTile(eventIdsWithMatches.length, "events with data"),
@@ -1035,43 +1086,73 @@ function renderStats() {
     createStatTile(mostPlayedSet || "-", "most played set")
   ].join("");
 
-  renderPersonalStats(personalEntries);
-  renderLeaderboardStats(activeUsersWithMatches);
-  renderHeadToHeadStats(canonicalFriendMatches);
-  renderRivalryStats(canonicalFriendMatches);
-  renderPersonalHistory(personalEntries);
+  renderGlobalLeaderboardStats(activeUsersWithMatches);
 }
 
-function renderPersonalStats(personalEntries) {
+function renderStats() {
+  renderGlobalStats();
+}
+
+function renderFriendsStats() {
+  const canonicalFriendMatches = buildCanonicalFriendMatches();
+  const activeFriendIds = [...new Set(canonicalFriendMatches.flatMap(match => [match.playerAId, match.playerBId]))];
+  const rivalryCount = new Set(canonicalFriendMatches.map(match => `${match.playerAId}-${match.playerBId}`)).size;
+  const topRivalry = getTopRivalryLabel(canonicalFriendMatches);
+
+  elements.friendsStatsSubtitle.textContent = "Tracked-friend results, rivalries, and in-group standings.";
+  elements.friendsOverviewGrid.innerHTML = [
+    createStatTile(canonicalFriendMatches.length, "friend matchups"),
+    createStatTile(activeFriendIds.length, "active friends"),
+    createStatTile(rivalryCount, "rivalries logged"),
+    createStatTile(topRivalry || "-", "top rivalry")
+  ].join("");
+
+  renderFriendsLeaderboardStats(canonicalFriendMatches);
+  renderRivalryStats(canonicalFriendMatches, elements.friendsRivalries);
+}
+
+function renderPersonalStatsPage() {
+  const personalEntries = matchEntries.filter(entry => entry.userId === activeUserId);
+  const canonicalFriendMatches = buildCanonicalFriendMatches();
+
+  elements.personalStatsSubtitle.textContent = `Personal stats for ${getActiveUserName()}.`;
+  renderDetailedPersonalStats(personalEntries, canonicalFriendMatches, elements.statsPersonal);
+  renderHeadToHeadStats(canonicalFriendMatches, elements.personalHeadToHead);
+  renderPersonalHistoryToTarget(personalEntries, elements.statsHistory);
+}
+
+function renderDetailedPersonalStats(personalEntries, canonicalFriendMatches, targetElement) {
   if (!personalEntries.length) {
-    elements.statsPersonal.innerHTML = '<div class="empty-state">No personal matches logged yet for this user.</div>';
+    targetElement.innerHTML = '<div class="empty-state">No personal matches logged yet for this user.</div>';
     return;
   }
 
   const overall = computeEntryStats(personalEntries);
   const friendOnly = computeEntryStats(personalEntries.filter(entry => entry.opponentKind === "tracked"));
   const profileSummary = getProfileSummary(activeUserId);
+  const matchupSummary = getPersonalMatchupSummary(canonicalFriendMatches, activeUserId);
+  const colorSummary = getPersonalColorSummary(personalEntries);
 
-  elements.statsPersonal.innerHTML = `
+  targetElement.innerHTML = `
     ${createListCard("Overall", `${overall.wins}-${overall.losses}-${overall.draws} match record`, [
       `Match win rate: ${formatPercent(overall.matchWinRate)}`,
       `Game win rate: ${formatPercent(overall.gameWinRate)}`,
-      `Matches logged: ${overall.matches}`
+      `Friend-only win rate: ${formatPercent(friendOnly.matchWinRate)}`
     ])}
-    ${createListCard("Friend-only", `${friendOnly.wins}-${friendOnly.losses}-${friendOnly.draws} vs tracked friends`, [
-      `Friend-only win rate: ${formatPercent(friendOnly.matchWinRate)}`,
-      `Friend-only game win rate: ${formatPercent(friendOnly.gameWinRate)}`,
-      `Tracked matches: ${friendOnly.matches}`
+    ${createListCard("Matchup story", matchupSummary.subtitle, [
+      `Nemesis: ${matchupSummary.nemesis}`,
+      `Best matchup: ${matchupSummary.bestMatchup}`,
+      `Most-played rival: ${matchupSummary.rival}`
     ])}
-    ${createListCard("Deck trends", profileSummary.primary, [
-      `Top colors: ${profileSummary.colors}`,
-      `Top archetype: ${profileSummary.archetype}`,
-      `Events logged: ${profileSummary.events}`
+    ${createListCard("Deck tendencies", profileSummary.primary, [
+      `Most-played colors: ${profileSummary.colors}`,
+      `Best win-rate colors: ${colorSummary.bestColors}`,
+      `Top archetype: ${profileSummary.archetype}`
     ])}
   `;
 }
 
-function renderLeaderboardStats(activeUsersWithMatches) {
+function renderGlobalLeaderboardStats(activeUsersWithMatches) {
   if (!activeUsersWithMatches.length) {
     elements.statsLeaderboard.innerHTML = '<div class="empty-state">No group data yet. Log some matches first.</div>';
     return;
@@ -1083,32 +1164,100 @@ function renderLeaderboardStats(activeUsersWithMatches) {
       const friendStats = computeEntryStats(matchEntries.filter(entry => entry.userId === user.id && entry.opponentKind === "tracked"));
       return { user, allStats, friendStats };
     })
-    .sort((left, right) => {
-      if (right.friendStats.matchWinRate !== left.friendStats.matchWinRate) {
-        return right.friendStats.matchWinRate - left.friendStats.matchWinRate;
-      }
-      return right.allStats.matchWinRate - left.allStats.matchWinRate;
-    });
+      .sort((left, right) =>
+        right.allStats.matchWinRate - left.allStats.matchWinRate ||
+        right.allStats.matches - left.allStats.matches ||
+        right.friendStats.matchWinRate - left.friendStats.matchWinRate
+      );
 
-  elements.statsLeaderboard.innerHTML = rows.map(({ user, allStats, friendStats }, index) =>
-    createListCard(
-      `#${index + 1} ${user.name}`,
-      `${allStats.wins}-${allStats.losses}-${allStats.draws} overall`,
+    elements.statsLeaderboard.innerHTML = rows.map(({ user, allStats, friendStats }, index) =>
+      createListCard(
+        `#${index + 1} ${user.name}`,
+        `${allStats.wins}-${allStats.losses}-${allStats.draws} overall`,
       [
         `Overall win rate: ${formatPercent(allStats.matchWinRate)}`,
         `Friend-only win rate: ${formatPercent(friendStats.matchWinRate)}`,
         `Logged matches: ${allStats.matches}`
       ]
+      )
+    ).join("");
+  }
+
+function renderFriendsLeaderboardStats(canonicalFriendMatches) {
+  if (!canonicalFriendMatches.length) {
+    elements.friendsLeaderboard.innerHTML = '<div class="empty-state">No friend-only matchups yet.</div>';
+    return;
+  }
+
+  const rows = new Map();
+  canonicalFriendMatches.forEach(match => {
+    [match.playerAId, match.playerBId].forEach(playerId => {
+      if (!rows.has(playerId)) {
+        rows.set(playerId, {
+          userId: playerId,
+          wins: 0,
+          losses: 0,
+          draws: 0,
+          gamesWon: 0,
+          gamesLost: 0,
+          matches: 0
+        });
+      }
+    });
+
+    const playerA = rows.get(match.playerAId);
+    const playerB = rows.get(match.playerBId);
+
+    playerA.matches += 1;
+    playerB.matches += 1;
+    playerA.gamesWon += match.gamesA;
+    playerA.gamesLost += match.gamesB;
+    playerB.gamesWon += match.gamesB;
+    playerB.gamesLost += match.gamesA;
+
+    if (match.winnerId === match.playerAId) {
+      playerA.wins += 1;
+      playerB.losses += 1;
+    } else if (match.winnerId === match.playerBId) {
+      playerB.wins += 1;
+      playerA.losses += 1;
+    } else {
+      playerA.draws += 1;
+      playerB.draws += 1;
+    }
+  });
+
+  const ordered = [...rows.values()]
+    .map(row => ({
+      ...row,
+      matchWinRate: calculateRate(row.wins, row.matches),
+      gameWinRate: calculateRate(row.gamesWon, row.gamesWon + row.gamesLost)
+    }))
+    .sort((left, right) =>
+      right.matchWinRate - left.matchWinRate ||
+      right.matches - left.matches ||
+      right.gameWinRate - left.gameWinRate
+    );
+
+  elements.friendsLeaderboard.innerHTML = ordered.map((row, index) =>
+    createListCard(
+      `#${index + 1} ${getUserName(row.userId)}`,
+      `${row.wins}-${row.losses}-${row.draws} vs tracked friends`,
+      [
+        `Friend win rate: ${formatPercent(row.matchWinRate)}`,
+        `Game win rate: ${formatPercent(row.gameWinRate)}`,
+        `Meetings: ${row.matches}`
+      ]
     )
   ).join("");
 }
 
-function renderHeadToHeadStats(canonicalFriendMatches) {
-  const rows = users
-    .filter(user => user.id !== activeUserId)
-    .map(user => {
-      const matches = canonicalFriendMatches.filter(match =>
-        (match.playerAId === activeUserId && match.playerBId === user.id) ||
+function renderHeadToHeadStats(canonicalFriendMatches, targetElement) {
+    const rows = users
+      .filter(user => user.id !== activeUserId)
+      .map(user => {
+        const matches = canonicalFriendMatches.filter(match =>
+          (match.playerAId === activeUserId && match.playerBId === user.id) ||
         (match.playerBId === activeUserId && match.playerAId === user.id)
       );
 
@@ -1148,33 +1297,33 @@ function renderHeadToHeadStats(canonicalFriendMatches) {
         draws,
         gameWinRate: calculateRate(gamesWon, gamesWon + gamesLost)
       };
-    })
-    .filter(Boolean)
-    .sort((left, right) => right.matches - left.matches || right.wins - left.wins);
+      })
+      .filter(Boolean)
+      .sort((left, right) => right.matches - left.matches || right.wins - left.wins);
 
-  if (!rows.length) {
-    elements.statsHeadToHead.innerHTML = '<div class="empty-state">No tracked head-to-head matches yet.</div>';
-    return;
-  }
+    if (!rows.length) {
+      targetElement.innerHTML = '<div class="empty-state">No tracked head-to-head matches yet.</div>';
+      return;
+    }
 
-  elements.statsHeadToHead.innerHTML = rows.map(row =>
-    createListCard(
-      row.user.name,
-      `${row.wins}-${row.losses}-${row.draws}`,
-      [
-        `Meetings: ${row.matches}`,
+    targetElement.innerHTML = rows.map(row =>
+      createListCard(
+        row.user.name,
+        `${row.wins}-${row.losses}-${row.draws}`,
+        [
+          `Meetings: ${row.matches}`,
         `Game win rate: ${formatPercent(row.gameWinRate)}`,
         `Series edge: ${row.wins > row.losses ? "Ahead" : row.wins < row.losses ? "Behind" : "Even"}`
       ]
-    )
-  ).join("");
-}
-
-function renderRivalryStats(canonicalFriendMatches) {
-  if (!canonicalFriendMatches.length) {
-    elements.statsRivalries.innerHTML = '<div class="empty-state">No friend-vs-friend rivalry data yet.</div>';
-    return;
+      )
+    ).join("");
   }
+
+function renderRivalryStats(canonicalFriendMatches, targetElement) {
+    if (!canonicalFriendMatches.length) {
+      targetElement.innerHTML = '<div class="empty-state">No friend-vs-friend rivalry data yet.</div>';
+      return;
+    }
 
   const rivalries = new Map();
   canonicalFriendMatches.forEach(match => {
@@ -1205,14 +1354,14 @@ function renderRivalryStats(canonicalFriendMatches) {
     .sort((left, right) =>
       right.meetings - left.meetings ||
       Math.abs(left.winsA - left.winsB) - Math.abs(right.winsA - right.winsB)
-    )
-    .slice(0, 8);
+      )
+      .slice(0, 8);
 
-  elements.statsRivalries.innerHTML = rows.map(row =>
-    createListCard(
-      `${getUserName(row.playerAId)} vs ${getUserName(row.playerBId)}`,
-      `${row.winsA}-${row.winsB}-${row.draws}`,
-      [
+    targetElement.innerHTML = rows.map(row =>
+      createListCard(
+        `${getUserName(row.playerAId)} vs ${getUserName(row.playerBId)}`,
+        `${row.winsA}-${row.winsB}-${row.draws}`,
+        [
         `Meetings: ${row.meetings}`,
         `Most recent shape: ${Math.abs(row.winsA - row.winsB) <= 1 ? "Close rivalry" : "One-sided streak"}`,
         `Friends only: yes`
@@ -1222,8 +1371,12 @@ function renderRivalryStats(canonicalFriendMatches) {
 }
 
 function renderPersonalHistory(personalEntries) {
+  renderPersonalHistoryToTarget(personalEntries, elements.statsHistory);
+}
+
+function renderPersonalHistoryToTarget(personalEntries, targetElement) {
   if (!personalEntries.length) {
-    elements.statsHistory.innerHTML = '<div class="empty-state">No event history yet for this user.</div>';
+    targetElement.innerHTML = '<div class="empty-state">No event history yet for this user.</div>';
     return;
   }
 
@@ -1245,10 +1398,10 @@ function renderPersonalHistory(personalEntries) {
     .filter(row => row.event)
     .sort((left, right) => right.event.date.localeCompare(left.event.date));
 
-  elements.statsHistory.innerHTML = rows.map(({ event, profile, stats }) =>
-    createListCard(
-        `${formatDate(event.date)} - ${formatCompactEventLabel(event)}`,
-        `${stats.wins}-${stats.losses}-${stats.draws}`,
+  targetElement.innerHTML = rows.map(({ event, profile, stats }) =>
+      createListCard(
+          `${formatDate(event.date)} - ${formatCompactEventLabel(event)}`,
+          `${stats.wins}-${stats.losses}-${stats.draws}`,
       [
         `Pod: ${profile?.pod || "Pod 1"}`,
         `Deck: ${getDeckColorLabel(profile?.deckColors)} / ${profile?.archetype || "No archetype"}`,
@@ -1325,6 +1478,128 @@ function getProfileSummary(userId) {
     colors: mostCommonLabel(profiles.map(profile => getDeckColorLabel(profile.deckColors)).filter(label => label !== "Not logged")) || "Not logged",
     archetype: mostCommonLabel(profiles.map(profile => profile.archetype).filter(Boolean)) || "Not logged",
     events: profiles.length
+  };
+}
+
+function getTopRivalryLabel(canonicalFriendMatches) {
+  if (!canonicalFriendMatches.length) {
+    return "";
+  }
+
+  const counts = new Map();
+  canonicalFriendMatches.forEach(match => {
+    const key = `${match.playerAId}-${match.playerBId}`;
+    if (!counts.has(key)) {
+      counts.set(key, {
+        label: `${getUserName(match.playerAId)} vs ${getUserName(match.playerBId)}`,
+        meetings: 0
+      });
+    }
+    counts.get(key).meetings += 1;
+  });
+
+  const top = [...counts.values()].sort((left, right) => right.meetings - left.meetings)[0];
+  return top ? `${top.label} (${top.meetings})` : "";
+}
+
+function getPersonalMatchupSummary(canonicalFriendMatches, userId) {
+  const rows = canonicalFriendMatches
+    .filter(match => match.playerAId === userId || match.playerBId === userId)
+    .reduce((map, match) => {
+      const opponentId = match.playerAId === userId ? match.playerBId : match.playerAId;
+      if (!map.has(opponentId)) {
+        map.set(opponentId, {
+          opponentId,
+          meetings: 0,
+          wins: 0,
+          losses: 0,
+          draws: 0
+        });
+      }
+
+      const row = map.get(opponentId);
+      row.meetings += 1;
+
+      if (match.winnerId === userId) {
+        row.wins += 1;
+      } else if (match.winnerId === opponentId) {
+        row.losses += 1;
+      } else {
+        row.draws += 1;
+      }
+
+      return map;
+    }, new Map());
+
+  const matchupRows = [...rows.values()].map(row => ({
+    ...row,
+    matchWinRate: calculateRate(row.wins, row.meetings)
+  }));
+
+  if (!matchupRows.length) {
+    return {
+      subtitle: "No tracked friend matchups yet",
+      nemesis: "Not enough data",
+      bestMatchup: "Not enough data",
+      rival: "Not enough data"
+    };
+  }
+
+  const nemesis = [...matchupRows]
+    .sort((left, right) =>
+      left.matchWinRate - right.matchWinRate ||
+      right.meetings - left.meetings ||
+      left.wins - right.wins
+    )[0];
+
+  const bestMatchup = [...matchupRows]
+    .sort((left, right) =>
+      right.matchWinRate - left.matchWinRate ||
+      right.meetings - left.meetings ||
+      right.wins - left.wins
+    )[0];
+
+  const rival = [...matchupRows]
+    .sort((left, right) => right.meetings - left.meetings || Math.abs(left.wins - left.losses) - Math.abs(right.wins - right.losses))[0];
+
+  return {
+    subtitle: `${matchupRows.length} tracked friend matchup${matchupRows.length === 1 ? "" : "s"} logged`,
+    nemesis: `${getUserName(nemesis.opponentId)} (${nemesis.wins}-${nemesis.losses}-${nemesis.draws})`,
+    bestMatchup: `${getUserName(bestMatchup.opponentId)} (${bestMatchup.wins}-${bestMatchup.losses}-${bestMatchup.draws})`,
+    rival: `${getUserName(rival.opponentId)} (${rival.meetings} meeting${rival.meetings === 1 ? "" : "s"})`
+  };
+}
+
+function getPersonalColorSummary(entries) {
+  const byColor = entries
+    .filter(entry => entry.deckColors)
+    .reduce((map, entry) => {
+      if (!map.has(entry.deckColors)) {
+        map.set(entry.deckColors, []);
+      }
+      map.get(entry.deckColors).push(entry);
+      return map;
+    }, new Map());
+
+  const rows = [...byColor.entries()].map(([deckColors, colorEntries]) => ({
+    deckColors,
+    stats: computeEntryStats(colorEntries)
+  }));
+
+  if (!rows.length) {
+    return {
+      bestColors: "Not logged"
+    };
+  }
+
+  const best = [...rows]
+    .sort((left, right) =>
+      right.stats.matchWinRate - left.stats.matchWinRate ||
+      right.stats.matches - left.stats.matches
+    )[0];
+
+  return {
+    bestColors: `${getDeckColorLabel(best.deckColors)} (${formatPercent(best.stats.matchWinRate)})`
   };
 }
 

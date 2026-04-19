@@ -483,6 +483,29 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   gap: 0.75rem;
 }
 
+.stats-shortcuts {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.stats-nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.stats-nav-button {
+  min-height: 40px;
+}
+
+.stats-nav-button.is-active,
+.stats-nav-button.is-active:hover,
+.stats-nav-button.is-active:focus {
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  border-color: transparent;
+  color: #1a1410;
+}
+
 .event-list,
 .list-stack {
   display: grid;
@@ -804,6 +827,10 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 @media (min-width: 640px) {
   .app-shell {
     padding-top: 2rem;
+  }
+
+  .stats-shortcuts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .field-grid {

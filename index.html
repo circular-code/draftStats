@@ -18,9 +18,9 @@
         <div class="card-body p-4 p-sm-5">
           <p class="eyebrow mb-2">DraftStats</p>
           <h1 class="display-title mb-3">Track draft nights, matchups, and rivalries over time.</h1>
-          <p class="text-secondary mb-4">
-            Pick who is logging data, jump into match entry, or check long-term stats for the whole group.
-          </p>
+            <p class="text-secondary mb-4">
+              Pick who is logging data, jump into match entry, or dive into global, friend, and personal stats.
+            </p>
 
           <div class="mb-3">
             <label class="form-label" for="active-user-select">Tracking as</label>
@@ -42,15 +42,23 @@
             </div>
           </div>
 
-          <div class="alert alert-warning d-none mb-4" id="user-alert" role="alert"></div>
+            <div class="alert alert-warning d-none mb-4" id="user-alert" role="alert"></div>
 
-          <div class="action-row">
-            <button class="btn btn-accent btn-lg w-100" id="track-button" type="button">Track</button>
-            <button class="btn btn-outline-light btn-lg w-100" id="stats-button" type="button">Stats</button>
+            <div class="action-row mb-3">
+              <button class="btn btn-accent btn-lg w-100" id="track-button" type="button">Track</button>
+            </div>
+
+            <div class="stats-shortcuts-block">
+              <h3 class="small-heading mb-3">Stats</h3>
+              <div class="stats-shortcuts">
+                <button class="btn btn-outline-light btn-lg w-100" id="global-stats-button" type="button">Global</button>
+                <button class="btn btn-outline-light btn-lg w-100" id="friends-stats-button" type="button">Friends</button>
+                <button class="btn btn-outline-light btn-lg w-100" id="personal-stats-button" type="button">Personal</button>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
 
     <section class="screen" id="screen-date">
       <div class="topbar">
@@ -226,41 +234,92 @@
       </div>
     </section>
 
-    <section class="screen" id="screen-stats">
-      <div class="topbar">
-        <button class="btn btn-link back-link px-0" data-back="screen-start" id="stats-back-button" type="button">Back</button>
-      </div>
-      <div class="card border-0 shadow-sm">
-        <div class="card-body p-4">
-          <p class="eyebrow mb-2">Leaderboard</p>
-          <h2 class="section-title mb-2">Draft stats</h2>
-          <p class="text-secondary mb-4" id="stats-subtitle">All-time numbers for the group and personal stats for the selected user.</p>
+      <section class="screen" id="screen-stats">
+        <div class="topbar">
+          <button class="btn btn-link back-link px-0" data-back="screen-start" id="stats-back-button" type="button">Back</button>
+        </div>
+        <div class="card border-0 shadow-sm">
+          <div class="card-body p-4">
+            <div class="stats-nav mb-4">
+              <button class="btn btn-outline-light btn-sm stats-nav-button is-active" data-stats-view="global" type="button">Global</button>
+              <button class="btn btn-outline-light btn-sm stats-nav-button" data-stats-view="friends" type="button">Friends</button>
+              <button class="btn btn-outline-light btn-sm stats-nav-button" data-stats-view="personal" type="button">Personal</button>
+            </div>
 
-          <div class="stats-grid mb-4" id="stats-overview-grid"></div>
+            <p class="eyebrow mb-2">Global</p>
+            <h2 class="section-title mb-2">Group stats</h2>
+            <p class="text-secondary mb-4" id="stats-subtitle">All-time numbers for the whole group.</p>
 
-          <div class="stats-section">
-            <h3 class="small-heading mb-3">Personal snapshot</h3>
-            <div class="list-stack" id="stats-personal"></div>
+            <div class="stats-grid mb-4" id="stats-overview-grid"></div>
+
+            <div class="stats-section">
+              <h3 class="small-heading mb-3">Global leaderboard</h3>
+              <div class="list-stack" id="stats-leaderboard"></div>
+            </div>
           </div>
+        </div>
+      </section>
 
-          <div class="stats-section">
-            <h3 class="small-heading mb-3">Group leaderboard</h3>
-            <div class="list-stack" id="stats-leaderboard"></div>
+      <section class="screen" id="screen-friends-stats">
+        <div class="topbar">
+          <button class="btn btn-link back-link px-0" data-back="screen-start" id="friends-stats-back-button" type="button">Back</button>
+        </div>
+        <div class="card border-0 shadow-sm">
+          <div class="card-body p-4">
+            <div class="stats-nav mb-4">
+              <button class="btn btn-outline-light btn-sm stats-nav-button" data-stats-view="global" type="button">Global</button>
+              <button class="btn btn-outline-light btn-sm stats-nav-button is-active" data-stats-view="friends" type="button">Friends</button>
+              <button class="btn btn-outline-light btn-sm stats-nav-button" data-stats-view="personal" type="button">Personal</button>
+            </div>
+
+            <p class="eyebrow mb-2">Friends</p>
+            <h2 class="section-title mb-2">Friend stats</h2>
+            <p class="text-secondary mb-4" id="friends-stats-subtitle">Tracked-friend results, rivalries, and in-group standings.</p>
+
+            <div class="stats-grid mb-4" id="friends-overview-grid"></div>
+
+            <div class="stats-section">
+              <h3 class="small-heading mb-3">Friends leaderboard</h3>
+              <div class="list-stack" id="friends-leaderboard"></div>
+            </div>
+
+            <div class="stats-section">
+              <h3 class="small-heading mb-3">Long-term rivalries</h3>
+              <div class="list-stack" id="friends-rivalries"></div>
+            </div>
           </div>
+        </div>
+      </section>
 
-          <div class="stats-section">
-            <h3 class="small-heading mb-3">Head-to-head</h3>
-            <div class="list-stack" id="stats-head-to-head"></div>
-          </div>
+      <section class="screen" id="screen-personal-stats">
+        <div class="topbar">
+          <button class="btn btn-link back-link px-0" data-back="screen-start" id="personal-stats-back-button" type="button">Back</button>
+        </div>
+        <div class="card border-0 shadow-sm">
+          <div class="card-body p-4">
+            <div class="stats-nav mb-4">
+              <button class="btn btn-outline-light btn-sm stats-nav-button" data-stats-view="global" type="button">Global</button>
+              <button class="btn btn-outline-light btn-sm stats-nav-button" data-stats-view="friends" type="button">Friends</button>
+              <button class="btn btn-outline-light btn-sm stats-nav-button is-active" data-stats-view="personal" type="button">Personal</button>
+            </div>
 
-          <div class="stats-section">
-            <h3 class="small-heading mb-3">Long-term rivalries</h3>
-            <div class="list-stack" id="stats-rivalries"></div>
-          </div>
+            <p class="eyebrow mb-2">Personal</p>
+            <h2 class="section-title mb-2">Your stats</h2>
+            <p class="text-secondary mb-4" id="personal-stats-subtitle">Stats for the selected user.</p>
 
-          <div class="stats-section">
-            <h3 class="small-heading mb-3">Personal event history</h3>
-            <div class="list-stack" id="stats-history"></div>
+            <div class="stats-section">
+              <h3 class="small-heading mb-3">Your snapshot</h3>
+              <div class="list-stack" id="stats-personal"></div>
+            </div>
+
+            <div class="stats-section">
+              <h3 class="small-heading mb-3">Head-to-head</h3>
+              <div class="list-stack" id="personal-head-to-head"></div>
+            </div>
+
+            <div class="stats-section">
+              <h3 class="small-heading mb-3">Your event history</h3>
+              <div class="list-stack" id="stats-history"></div>
           </div>
         </div>
       </div>
