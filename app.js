@@ -2559,15 +2559,16 @@ function populateDeckColorSelect(selectedValue = "") {
 }
 
 function populateArchetypeSelect(selectedValue = "") {
-  const selectedArchetypes = new Set(normalizeArchetypes(selectedValue).map(normalize));
-  elements.archetypeSelect.innerHTML = "";
+  const selectedArchetypes = normalizeArchetypes(selectedValue);
+  const selectedArchetype = selectedArchetypes[0] || "";
+  elements.archetypeSelect.innerHTML = '<option value="">Choose...</option>';
   archetypeOptions.forEach(archetype => {
     const option = document.createElement("option");
     option.value = archetype;
     option.textContent = archetype;
-    option.selected = selectedArchetypes.has(normalize(archetype));
     elements.archetypeSelect.appendChild(option);
   });
+  elements.archetypeSelect.value = selectedArchetype;
 }
 
 function populateOpponentSelect(selectedValue = "") {
@@ -2865,7 +2866,7 @@ function saveCurrentProfile() {
   const profile = getOrCreateEventProfile(currentEventId, activeUserId);
   profile.pod = elements.podSelect.value || "Pod 1";
   profile.deckColors = elements.deckColorSelect.value;
-  profile.archetype = [...elements.archetypeSelect.selectedOptions].map(option => option.value).filter(Boolean);
+  profile.archetype = elements.archetypeSelect.value ? [elements.archetypeSelect.value] : [];
   const currentEvent = getCurrentEvent();
   if (currentEvent) {
     persistEventRecord(currentEvent);
