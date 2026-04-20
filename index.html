@@ -235,6 +235,7 @@
             <div class="summary-card mb-4" id="current-event-banner"></div>
 
             <div class="stack-card mb-4">
+              <p class="eyebrow mb-2">Event Profile</p>
               <div class="field-grid compact-grid shared-info-grid">
                 <div>
                   <label class="form-label" for="pod-select">Pod</label>
@@ -253,54 +254,54 @@
                   <select class="form-select has-caret" id="archetype-select" aria-describedby="archetype-select-hint"></select>
                   <span class="select-caret" aria-hidden="true"></span>
                 </div>
-                <div class="small text-secondary mt-2" id="archetype-select-hint">Choose the primary archetype for now.</div>
+                </div>
               </div>
             </div>
 
-            <div class="match-round-bar mb-3">
-              <div class="match-round-label">Rounds</div>
-              <div class="match-round-selector" id="match-round-nav"></div>
-            </div>
-
-          <div class="stack-card mb-4">
-            <div class="alert alert-warning d-none mb-3" id="match-alert" role="alert"></div>
-
-            <form id="match-form" novalidate>
-              <div class="mb-3">
-                <label class="form-label" for="opponent-select">Opponent</label>
-                <div class="select-wrap">
-                  <select class="form-select form-select-lg has-caret required-field" id="opponent-select" required></select>
-                  <span class="select-caret" aria-hidden="true"></span>
-                </div>
-                <div class="small text-secondary mt-2">Leave this on NPC opponent if you do not care about tracking the opponent, otherwise select one, or add a new one below.</div>
+            <div class="stack-card mb-4">
+              <p class="eyebrow mb-2">Round Details</p>
+              <div class="match-round-bar mb-3">
+                <div class="match-round-label">Rounds</div>
+                <div class="match-round-selector" id="match-round-nav"></div>
               </div>
+              <div class="alert alert-warning d-none mb-3" id="match-alert" role="alert"></div>
 
-              <div class="mb-3">
-                <label class="form-label" for="new-opponent-input">Add new opponent</label>
-                <div class="row g-2">
-                  <div class="col-8">
-                    <input class="form-control form-control-lg" id="new-opponent-input" type="text" maxlength="40" placeholder="Enter opponent name">
+              <form id="match-form" novalidate>
+                <div class="mb-3">
+                  <label class="form-label" for="opponent-select">Opponent</label>
+                  <div class="select-wrap">
+                    <select class="form-select form-select-lg has-caret required-field" id="opponent-select" required></select>
+                    <span class="select-caret" aria-hidden="true"></span>
                   </div>
-                  <div class="col-4">
-                    <button class="btn btn-outline-light w-100 h-100" id="create-opponent-button" type="button">Add</button>
-                  </div>
+                  <div class="small text-secondary mt-2">Leave this on NPC opponent if you do not care about tracking the opponent, otherwise select one, or add a new one below.</div>
                 </div>
-              </div>
 
-              <div class="admin-tools d-none mb-3" id="admin-opponent-tools">
-                <label class="form-label" for="remove-opponent-select">Remove opponent</label>
-                <div class="row g-2">
-                  <div class="col-8">
-                    <div class="select-wrap">
-                      <select class="form-select form-select-lg has-caret" id="remove-opponent-select"></select>
-                      <span class="select-caret" aria-hidden="true"></span>
+                <div class="mb-3">
+                  <label class="form-label" for="new-opponent-input">Add new opponent</label>
+                  <div class="row g-2">
+                    <div class="col-8">
+                      <input class="form-control form-control-lg" id="new-opponent-input" type="text" maxlength="40" placeholder="Enter opponent name">
+                    </div>
+                    <div class="col-4">
+                      <button class="btn btn-outline-light w-100 h-100" id="create-opponent-button" type="button">Add</button>
                     </div>
                   </div>
-                  <div class="col-4">
-                    <button class="btn btn-outline-danger w-100 h-100" id="remove-opponent-button" type="button">Remove</button>
+                </div>
+
+                <div class="admin-tools d-none mb-3" id="admin-opponent-tools">
+                  <label class="form-label" for="remove-opponent-select">Remove opponent</label>
+                  <div class="row g-2">
+                    <div class="col-8">
+                      <div class="select-wrap">
+                        <select class="form-select form-select-lg has-caret" id="remove-opponent-select"></select>
+                        <span class="select-caret" aria-hidden="true"></span>
+                      </div>
+                    </div>
+                    <div class="col-4">
+                      <button class="btn btn-outline-danger w-100 h-100" id="remove-opponent-button" type="button">Remove</button>
+                    </div>
                   </div>
                 </div>
-              </div>
 
                 <div class="mb-3">
                   <label class="form-label">Score</label>
@@ -326,6 +327,7 @@
                   <button class="btn btn-accent btn-lg w-100" id="save-match-button" type="button">Done</button>
                 </div>
               </form>
+            </div>
           </div>
         </div>
       </div>
