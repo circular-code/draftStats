@@ -2,7 +2,6 @@ import {
   changeCurrentUserPassword,
   deleteCustomLocation,
   deleteEvent,
-  deleteLegacyCustomUser,
   deleteEventProfile,
   deleteMatchEntry,
   deleteCustomOpponent,
@@ -180,7 +179,6 @@ const archetypeOptions = [
 
 const users = [];
 const userProfiles = [];
-const legacyUsers = [];
 
 const baseLocations = [];
 
@@ -472,7 +470,6 @@ async function hydratePersistedState() {
   const persistedState = await loadPersistedState();
 
   mergePersistedUsers(persistedState.userProfiles || []);
-  mergeLegacyUsers(persistedState.legacyUsers || []);
   replaceStringCollection(customLocations, persistedState.customLocations || []);
   replaceStringCollection(customOpponents, persistedState.customOpponents || []);
   mergePersistedEvents(persistedState.events || []);
@@ -519,31 +516,6 @@ function mergePersistedUsers(persistedUsers) {
   rebuildUsers();
 }
 
-function mergeLegacyUsers(persistedUsers) {
-  persistedUsers.forEach(user => {
-    if (!user?.id || !user?.name) {
-      return;
-    }
-
-    const normalizedId = normalizeUserId(user.id);
-    const existingIndex = legacyUsers.findIndex(entry => entry.id === normalizedId);
-    if (existingIndex !== -1) {
-      legacyUsers[existingIndex] = {
-        ...legacyUsers[existingIndex],
-        id: normalizedId,
-        name: user.name
-      };
-    } else {
-      legacyUsers.push({
-        id: normalizedId,
-        name: user.name
-      });
-    }
-  });
-
-  rebuildUsers();
-}
-
 function rebuildUsers() {
   users.splice(0, users.length);
 
@@ -555,16 +527,6 @@ function rebuildUsers() {
         name: user.nickname,
         source: "auth",
         accentColor: sanitizeAccentColor(user.accentColor || user.accentTheme)
-      });
-    });
-
-  legacyUsers
-    .filter(user => !userProfiles.some(profile => profile.nickname && normalize(profile.nickname) === normalize(user.name)))
-    .forEach(user => {
-      users.push({
-        id: normalizeUserId(user.id),
-        name: user.name,
-        source: "legacy"
       });
     });
 
@@ -756,10 +718,6 @@ function logPersistenceFailure(context, error) {
   }
 
   console.error(`Failed to persist ${context}.`, error);
-}
-
-function persistDeletedLegacyUser(userId) {
-  void deleteLegacyCustomUser(userId).catch(error => logPersistenceFailure("legacy user cleanup", error));
 }
 
 function persistCustomLocationRecord(locationName) {
@@ -1415,10 +1373,6 @@ function findAuthUserByNickname(nickname, excludeId = "") {
   ) || null;
 }
 
-function findLegacyUsersByNickname(nickname) {
-  return legacyUsers.filter(user => normalize(user.name) === normalize(nickname));
-}
-
 function upsertCurrentAuthProfile(profile) {
   mergePersistedUsers([{
     id: normalizeUserId(profile.id),
@@ -1456,10 +1410,6 @@ async function handleAuthStateChange(user) {
 
     upsertCurrentAuthProfile(profile);
     needsNicknameSetup = !profile.nickname;
-
-    if (profile.nickname) {
-      await migrateLegacyUserDataIfNeeded(user.uid, profile.nickname);
-    }
   } catch (error) {
     console.error("Failed to sync auth state.", error);
     showUserAlert("Signed in, but the player profile could not be loaded yet.");
@@ -1619,7 +1569,6 @@ async function saveProfileForCurrentUser(profileDraft, authUser = currentAuthUse
     await saveUserProfile(userProfile);
     upsertCurrentAuthProfile(userProfile);
     await updateAuthNickname(authUser, nickname);
-    await migrateLegacyUserDataIfNeeded(authUser.uid, nickname);
     mergeNamedOpponentIntoTrackedUser({
       id: normalizeUserId(authUser.uid),
       name: nickname
@@ -1793,83 +1742,6 @@ function mergeMatchRecords(targetEntry, sourceEntry) {
     score: mergeProfileValues(targetEntry.score, sourceEntry.score, "2-0"),
     result: mergeProfileValues(targetEntry.result, sourceEntry.result, "win")
   };
-}
-
-async function migrateLegacyUserDataIfNeeded(targetUserId, nickname) {
-  const normalizedTargetId = normalizeUserId(targetUserId);
-  const matchingLegacyUsers = findLegacyUsersByNickname(nickname).filter(user => user.id !== normalizedTargetId);
-
-  if (!matchingLegacyUsers.length) {
-    return;
-  }
-
-  matchingLegacyUsers.forEach(legacyUser => {
-    for (let index = eventProfiles.length - 1; index >= 0; index -= 1) {
-      const legacyProfile = eventProfiles[index];
-      if (legacyProfile.userId !== legacyUser.id) {
-        continue;
-      }
-
-      const existingIndex = eventProfiles.findIndex(profile =>
-        profile.eventId === legacyProfile.eventId &&
-        profile.userId === normalizedTargetId
-      );
-
-      if (existingIndex !== -1) {
-        eventProfiles[existingIndex] = mergeProfileRecords(eventProfiles[existingIndex], legacyProfile);
-        persistEventProfileRecord(eventProfiles[existingIndex]);
-        eventProfiles.splice(index, 1);
-        persistDeletedEventProfile(legacyProfile);
-      } else {
-        const migratedProfile = {
-          ...legacyProfile,
-          userId: normalizedTargetId
-        };
-        eventProfiles[index] = migratedProfile;
-        persistDeletedEventProfile(legacyProfile);
-        persistEventProfileRecord(migratedProfile);
-      }
-    }
-
-    for (let index = matchEntries.length - 1; index >= 0; index -= 1) {
-      const entry = matchEntries[index];
-      const migratedEntry = {
-        ...entry,
-        userId: entry.userId === legacyUser.id ? normalizedTargetId : entry.userId,
-        opponentUserId: entry.opponentUserId === legacyUser.id ? normalizedTargetId : entry.opponentUserId
-      };
-
-      if (migratedEntry.userId === entry.userId && migratedEntry.opponentUserId === entry.opponentUserId) {
-        continue;
-      }
-
-      const duplicateIndex = matchEntries.findIndex(other =>
-        other.id !== entry.id &&
-        other.eventId === migratedEntry.eventId &&
-        other.round === migratedEntry.round &&
-        other.userId === migratedEntry.userId
-      );
-
-      if (duplicateIndex !== -1) {
-        matchEntries[duplicateIndex] = mergeMatchRecords(matchEntries[duplicateIndex], migratedEntry);
-        persistMatchEntryRecord(matchEntries[duplicateIndex]);
-        matchEntries.splice(index, 1);
-        persistDeletedMatchEntry(entry);
-      } else {
-        matchEntries[index] = migratedEntry;
-        persistMatchEntryRecord(migratedEntry);
-      }
-    }
-
-    const legacyIndex = legacyUsers.findIndex(user => user.id === legacyUser.id);
-    if (legacyIndex !== -1) {
-      legacyUsers.splice(legacyIndex, 1);
-    }
-
-    persistDeletedLegacyUser(legacyUser.id);
-  });
-
-  rebuildUsers();
 }
 
 function handleTrackStart() {
@@ -4283,11 +4155,7 @@ function getNextIndex(date, set, location, format = "Draft") {
 }
 
 function getLocationOptions() {
-  const homeLocations = [...users]
-    .sort((left, right) => left.name.localeCompare(right.name))
-    .map(user => `${user.name}'s Home`);
-
-  const merged = [...baseLocations, ...homeLocations, ...customLocations];
+  const merged = [...baseLocations, ...customLocations];
   return dedupeStrings(merged);
 }
 

@@ -29,7 +29,6 @@ import { firebaseConfig, firebaseOptions } from "./firebase-config.js";
 
 const COLLECTIONS = {
   users: "users",
-  customUsers: "customUsers",
   customLocations: "customLocations",
   customOpponents: "customOpponents",
   events: "events",
@@ -199,7 +198,6 @@ export async function loadPersistedState() {
   if (!firebaseReady) {
     return {
       userProfiles: [],
-      legacyUsers: [],
       customLocations: [],
       customOpponents: [],
       events: [],
@@ -210,7 +208,6 @@ export async function loadPersistedState() {
 
   const [
     userProfiles,
-    legacyUsers,
     customLocations,
     customOpponents,
     events,
@@ -218,7 +215,6 @@ export async function loadPersistedState() {
     matchEntries
   ] = await Promise.all([
     readCollection(COLLECTIONS.users),
-    readCollection(COLLECTIONS.customUsers),
     readCollection(COLLECTIONS.customLocations),
     readCollection(COLLECTIONS.customOpponents),
     readCollection(COLLECTIONS.events),
@@ -235,12 +231,6 @@ export async function loadPersistedState() {
         accentColor: user.accentColor || user.accentTheme || ""
       }))
       .filter(user => user.id),
-    legacyUsers: legacyUsers
-      .map(user => ({
-        id: normalizeUserId(user.id),
-        name: user.name || ""
-      }))
-      .filter(user => user.id && user.name),
     customLocations: customLocations.map(entry => entry.name || "").filter(Boolean),
     customOpponents: customOpponents.map(entry => entry.name || "").filter(Boolean),
     events: events.map(event => ({
@@ -304,14 +294,6 @@ export async function saveUserProfile(userProfile) {
     }),
     { merge: true }
   );
-}
-
-export async function deleteLegacyCustomUser(userId) {
-  if (!firebaseReady || !userId) {
-    return;
-  }
-
-  await deleteDoc(doc(firestore, COLLECTIONS.customUsers, normalizeUserId(userId)));
 }
 
 export async function saveCustomLocation(name) {

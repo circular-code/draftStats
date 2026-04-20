@@ -203,6 +203,14 @@ small,
   padding-top: 0.25rem;
 }
 
+#remove-event-select,
+#remove-location-select,
+#remove-opponent-select {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: var(--text-main) !important;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
 .auth-stack {
   display: grid;
   gap: 1rem;
