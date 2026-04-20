@@ -474,8 +474,23 @@ async function hydratePersistedState() {
   replaceStringCollection(customOpponents, persistedState.customOpponents || []);
   mergePersistedEvents(persistedState.events || []);
 
-  eventProfiles.splice(0, eventProfiles.length, ...(persistedState.eventProfiles || []));
-  matchEntries.splice(0, matchEntries.length, ...(persistedState.matchEntries || []));
+  eventProfiles.splice(
+    0,
+    eventProfiles.length,
+    ...((persistedState.eventProfiles || []).map(profile => ({
+      ...profile,
+      archetype: normalizeArchetypes(profile.archetype)
+    })))
+  );
+  matchEntries.splice(
+    0,
+    matchEntries.length,
+    ...((persistedState.matchEntries || []).map(entry => ({
+      ...entry,
+      archetype: normalizeArchetypes(entry.archetype)
+    })))
+  );
+  reconcileTrackedUserOpponentIdentities();
   eventPods.splice(0, eventPods.length);
 
   nextEventId = Math.max(...events.map(event => Number(event.id) || 0), 0) + 1;
@@ -559,6 +574,37 @@ function getActiveUserRecord() {
 
 function getUserRecord(userId) {
   return users.find(user => user.id === normalizeUserId(userId)) || null;
+}
+
+function getTrackedUserByNormalizedName(normalizedName, excludeId = "") {
+  if (!normalizedName) {
+    return null;
+  }
+
+  return users.find(user =>
+    user.name &&
+    normalize(user.name) === normalizedName &&
+    user.id !== normalizeUserId(excludeId)
+  ) || null;
+}
+
+function getTrackedUserByName(name, excludeId = "") {
+  const trimmedName = String(name || "").trim();
+  return trimmedName ? getTrackedUserByNormalizedName(normalize(trimmedName), excludeId) : null;
+}
+
+function getNamedOpponentSelfConflictEntries(userId, opponentName) {
+  const normalizedUserId = normalizeUserId(userId);
+  const normalizedName = normalize(String(opponentName || "").trim());
+  if (!normalizedUserId || !normalizedName) {
+    return [];
+  }
+
+  return matchEntries.filter(entry =>
+    normalizeUserId(entry.userId) === normalizedUserId &&
+    entry.opponentKind === "named" &&
+    normalize(entry.opponentName || "") === normalizedName
+  );
 }
 
 function hasUsableNickname() {
@@ -686,6 +732,7 @@ function populateRemoveOpponentSelect() {
   elements.removeOpponentSelect.appendChild(placeholder);
 
   [...customOpponents]
+    .filter(name => !getTrackedUserByName(name))
     .sort((left, right) => left.localeCompare(right))
     .forEach(name => {
       const option = document.createElement("option");
@@ -1366,11 +1413,7 @@ function getFriendlyAuthError(error) {
 }
 
 function findAuthUserByNickname(nickname, excludeId = "") {
-  return userProfiles.find(user =>
-    user.nickname &&
-    normalize(user.nickname) === normalize(nickname) &&
-    user.id !== normalizeUserId(excludeId)
-  ) || null;
+  return getTrackedUserByName(nickname, excludeId);
 }
 
 function upsertCurrentAuthProfile(profile) {
@@ -1553,6 +1596,17 @@ async function saveProfileForCurrentUser(profileDraft, authUser = currentAuthUse
     return;
   }
 
+  const normalizedAuthUserId = normalizeUserId(authUser.uid);
+  const currentNickname = userProfiles.find(profile => profile.id === normalizedAuthUserId)?.nickname || "";
+  const isChangingNickname = normalize(currentNickname || "") !== normalize(nickname);
+  if (isChangingNickname) {
+    const selfConflictEntries = getNamedOpponentSelfConflictEntries(normalizedAuthUserId, nickname);
+    if (selfConflictEntries.length) {
+      showAccountModalAlert("That nickname is already used in your own unregistered-opponent history. Pick another nickname first.");
+      return;
+    }
+  }
+
   authBusy = true;
   renderAuthUi();
   hideAccountModalAlert();
@@ -1569,10 +1623,14 @@ async function saveProfileForCurrentUser(profileDraft, authUser = currentAuthUse
     await saveUserProfile(userProfile);
     upsertCurrentAuthProfile(userProfile);
     await updateAuthNickname(authUser, nickname);
-    mergeNamedOpponentIntoTrackedUser({
+    reconcileTrackedUserOpponentIdentities();
+    const mergeResult = mergeNamedOpponentIntoTrackedUser({
       id: normalizeUserId(authUser.uid),
       name: nickname
     });
+    if (mergeResult.blockedSelfConflicts.length) {
+      throw new Error("nickname-self-conflict");
+    }
 
     activeUserId = normalizeUserId(authUser.uid);
     needsNicknameSetup = false;
@@ -1585,7 +1643,9 @@ async function saveProfileForCurrentUser(profileDraft, authUser = currentAuthUse
     }
   } catch (error) {
     console.error("Failed to save profile.", error);
-    showAccountModalAlert("Could not save that profile yet.");
+    showAccountModalAlert(error?.message === "nickname-self-conflict"
+      ? "That nickname would collide with your own unregistered-opponent history. Pick another nickname first."
+      : "Could not save that profile yet.");
   } finally {
     authBusy = false;
     refreshUserBoundUi();
@@ -1725,12 +1785,33 @@ function mergeProfileValues(primaryValue, fallbackValue, defaultValue = "") {
   return primaryValue || fallbackValue || defaultValue;
 }
 
+function normalizeArchetypes(value) {
+  if (Array.isArray(value)) {
+    return dedupeStrings(value.map(entry => String(entry || "").trim()).filter(Boolean));
+  }
+
+  if (typeof value === "string") {
+    return value.trim() ? [value.trim()] : [];
+  }
+
+  return [];
+}
+
+function mergeArchetypeValues(primaryValue, fallbackValue) {
+  const primaryArchetypes = normalizeArchetypes(primaryValue);
+  if (primaryArchetypes.length) {
+    return primaryArchetypes;
+  }
+
+  return normalizeArchetypes(fallbackValue);
+}
+
 function mergeProfileRecords(targetProfile, sourceProfile) {
   return {
     ...targetProfile,
     pod: mergeProfileValues(targetProfile.pod, sourceProfile.pod, "Pod 1"),
     deckColors: mergeProfileValues(targetProfile.deckColors, sourceProfile.deckColors),
-    archetype: mergeProfileValues(targetProfile.archetype, sourceProfile.archetype)
+    archetype: mergeArchetypeValues(targetProfile.archetype, sourceProfile.archetype)
   };
 }
 
@@ -1756,13 +1837,28 @@ function handleTrackStart() {
   showScreen("date");
 }
 
-function mergeNamedOpponentIntoTrackedUser(createdUser) {
-  const normalizedName = normalize(createdUser.name);
-  const duplicateOpponents = customOpponents.filter(name => normalize(name) === normalizedName);
-
-  if (!duplicateOpponents.length) {
-    return;
+function mergeNamedOpponentIntoTrackedUser(createdUser, options = {}) {
+  const { persist = true, refreshSelection = true } = options;
+  const normalizedName = normalize(String(createdUser?.name || "").trim());
+  const normalizedUserId = normalizeUserId(createdUser?.id);
+  if (!normalizedName || !normalizedUserId) {
+    return {
+      removedOpponentNames: [],
+      updatedMatches: [],
+      blockedSelfConflicts: []
+    };
   }
+
+  const blockedSelfConflicts = getNamedOpponentSelfConflictEntries(normalizedUserId, createdUser.name);
+  if (blockedSelfConflicts.length) {
+    return {
+      removedOpponentNames: [],
+      updatedMatches: [],
+      blockedSelfConflicts
+    };
+  }
+
+  const duplicateOpponents = customOpponents.filter(name => normalize(name) === normalizedName);
 
   for (let index = customOpponents.length - 1; index >= 0; index -= 1) {
     if (normalize(customOpponents[index]) === normalizedName) {
@@ -1781,7 +1877,7 @@ function mergeNamedOpponentIntoTrackedUser(createdUser) {
     }
 
     entry.opponentKind = "tracked";
-    entry.opponentUserId = createdUser.id;
+    entry.opponentUserId = normalizedUserId;
     entry.opponentName = createdUser.name;
     updatedMatches.push(entry);
   });
@@ -1789,12 +1885,48 @@ function mergeNamedOpponentIntoTrackedUser(createdUser) {
   const selectedOpponentValue = elements.opponentSelect?.value || "";
   const shouldSelectTrackedUser = duplicateOpponents.some(name => selectedOpponentValue === `named:${name}`);
 
-  if (elements.opponentSelect) {
-    populateOpponentSelect(shouldSelectTrackedUser ? `user:${createdUser.id}` : selectedOpponentValue);
+  if (viewedPersonalStatsSubject?.kind === "named" && normalize(viewedPersonalStatsSubject.name || "") === normalizedName) {
+    viewedPersonalStatsSubject = createTrackedPersonalStatsSubject(normalizedUserId);
   }
 
-  duplicateOpponents.forEach(name => deleteCustomOpponentRecord(name));
-  updatedMatches.forEach(entry => persistMatchEntryRecord(entry));
+  if (elements.opponentSelect && refreshSelection) {
+    populateOpponentSelect(shouldSelectTrackedUser ? `user:${normalizedUserId}` : selectedOpponentValue);
+  }
+
+  if (persist) {
+    duplicateOpponents.forEach(name => deleteCustomOpponentRecord(name));
+    updatedMatches.forEach(entry => persistMatchEntryRecord(entry));
+  }
+
+  return {
+    removedOpponentNames: duplicateOpponents,
+    updatedMatches,
+    blockedSelfConflicts: []
+  };
+}
+
+function reconcileTrackedUserOpponentIdentities(options = {}) {
+  const { persist = true, refreshSelection = true } = options;
+  const blockedSelfConflicts = [];
+
+  users.forEach(user => {
+    const result = mergeNamedOpponentIntoTrackedUser(user, {
+      persist,
+      refreshSelection: false
+    });
+
+    if (result.blockedSelfConflicts.length) {
+      blockedSelfConflicts.push(...result.blockedSelfConflicts);
+    }
+  });
+
+  if (elements.opponentSelect && refreshSelection) {
+    populateOpponentSelect(elements.opponentSelect.value || "npc");
+  }
+
+  return {
+    blockedSelfConflicts
+  };
 }
 
 function handleCreateLocation() {
@@ -1878,6 +2010,20 @@ function handleCreateOpponent() {
   const trimmedOpponent = elements.newOpponentInput.value.trim();
   if (!trimmedOpponent) {
     showMatchAlert("Enter an opponent name before adding one.");
+    return;
+  }
+
+  const matchingTrackedUser = getTrackedUserByName(trimmedOpponent);
+  if (matchingTrackedUser) {
+    if (matchingTrackedUser.id === activeUserId) {
+      showMatchAlert("That name already belongs to your registered player profile.");
+      return;
+    }
+
+    populateOpponentSelect(`user:${matchingTrackedUser.id}`);
+    elements.newOpponentInput.value = "";
+    hideMatchAlert();
+    handleOpponentSelectionChange();
     return;
   }
 
@@ -2413,14 +2559,15 @@ function populateDeckColorSelect(selectedValue = "") {
 }
 
 function populateArchetypeSelect(selectedValue = "") {
-  elements.archetypeSelect.innerHTML = '<option value="">Choose...</option>';
+  const selectedArchetypes = new Set(normalizeArchetypes(selectedValue).map(normalize));
+  elements.archetypeSelect.innerHTML = "";
   archetypeOptions.forEach(archetype => {
     const option = document.createElement("option");
     option.value = archetype;
     option.textContent = archetype;
+    option.selected = selectedArchetypes.has(normalize(archetype));
     elements.archetypeSelect.appendChild(option);
   });
-  elements.archetypeSelect.value = selectedValue || "";
 }
 
 function populateOpponentSelect(selectedValue = "") {
@@ -2446,6 +2593,7 @@ function populateOpponentSelect(selectedValue = "") {
     });
 
   [...customOpponents]
+    .filter(name => !getTrackedUserByName(name))
     .sort((left, right) => left.localeCompare(right))
     .forEach(name => {
       const option = document.createElement("option");
@@ -2463,7 +2611,7 @@ function populateOpponentSelect(selectedValue = "") {
 
 function findExistingOpponentOptionValueByName(name) {
   const normalizedName = normalize(name);
-  const trackedOpponent = users.find(user => user.id !== activeUserId && normalize(user.name) === normalizedName);
+  const trackedOpponent = getTrackedUserByNormalizedName(normalizedName, activeUserId);
   if (trackedOpponent) {
     return `user:${trackedOpponent.id}`;
   }
@@ -2717,7 +2865,7 @@ function saveCurrentProfile() {
   const profile = getOrCreateEventProfile(currentEventId, activeUserId);
   profile.pod = elements.podSelect.value || "Pod 1";
   profile.deckColors = elements.deckColorSelect.value;
-  profile.archetype = elements.archetypeSelect.value;
+  profile.archetype = [...elements.archetypeSelect.selectedOptions].map(option => option.value).filter(Boolean);
   const currentEvent = getCurrentEvent();
   if (currentEvent) {
     persistEventRecord(currentEvent);
@@ -3291,17 +3439,20 @@ function renderGlobalLeaderboardStats(activeUsersWithMatches) {
         right.friendStats.matchWinRate - left.friendStats.matchWinRate
       );
 
-    elements.statsLeaderboard.innerHTML = rows.map(({ user, allStats, friendStats }, index) =>
-      createListCard(
-        `#${index + 1} ${user.name}`,
-        `${allStats.wins}-${allStats.losses}-${allStats.draws} overall`,
+  elements.statsLeaderboard.innerHTML = rows.map(({ user, allStats, friendStats }, index) =>
+    createListCard(
+      "",
+      `${allStats.wins}-${allStats.losses}-${allStats.draws} overall`,
       [
         `Overall win rate: ${formatPercent(allStats.matchWinRate)}`,
         `Friend-only win rate: ${formatPercent(friendStats.matchWinRate)}`,
         `Logged matches: ${allStats.matches}`
-      ]
-      )
-    ).join("");
+      ],
+      {
+        titleHtml: renderLeaderboardTitle(user.id, index + 1, "screen-stats")
+      }
+    )
+  ).join("");
   }
 
 function renderFriendsLeaderboardStats(canonicalFriendMatches) {
@@ -3362,13 +3513,16 @@ function renderFriendsLeaderboardStats(canonicalFriendMatches) {
 
   elements.friendsLeaderboard.innerHTML = ordered.map((row, index) =>
     createListCard(
-      `#${index + 1} ${getUserName(row.userId)}`,
+      "",
       `${row.wins}-${row.losses}-${row.draws} vs tracked friends`,
       [
         `Friend win rate: ${formatPercent(row.matchWinRate)}`,
         `Game win rate: ${formatPercent(row.gameWinRate)}`,
         `Meetings: ${row.matches}`
-      ]
+      ],
+      {
+        titleHtml: renderLeaderboardTitle(row.userId, index + 1, "screen-friends-stats")
+      }
     )
   ).join("");
 }
@@ -3528,7 +3682,7 @@ function renderPersonalHistoryToTarget(userId, personalEntries, targetElement) {
           `${stats.wins}-${stats.losses}-${stats.draws}`,
       [
         `Pod: ${profile?.pod || "Pod 1"}`,
-        `Deck: ${getDeckColorLabel(profile?.deckColors)} / ${profile?.archetype || "No archetype"}`,
+        `Deck: ${getDeckColorLabel(profile?.deckColors)} / ${getArchetypeLabel(profile?.archetype)}`,
         `Matches logged: ${stats.matches}`
       ]
     )
@@ -3601,7 +3755,7 @@ function getProfileSummary(userId) {
   return {
     primary: `${profiles.length} event profile${profiles.length === 1 ? "" : "s"} logged`,
     colors: mostCommonLabel(profiles.map(profile => getDeckColorLabel(profile.deckColors)).filter(label => label !== "Not logged")) || "Not logged",
-    archetype: mostCommonLabel(profiles.map(profile => profile.archetype).filter(Boolean)) || "Not logged",
+    archetype: mostCommonLabel(profiles.flatMap(profile => normalizeArchetypes(profile.archetype))) || "Not logged",
     events: profiles.length
   };
 }
@@ -3965,15 +4119,26 @@ function createStatTile(value, label) {
   return `<div class="stat-tile"><strong>${value}</strong><span>${label}</span></div>`;
 }
 
-function createListCard(title, subtitle, rows) {
+function createListCard(title, subtitle, rows, options = {}) {
+  const titleMarkup = options.titleHtml || `<div class="fw-bold">${title}</div>`;
   return `
     <article class="list-card">
-      <div class="fw-bold">${title}</div>
+      ${titleMarkup}
       <div class="small text-secondary mt-1">${subtitle}</div>
       <div class="match-meta">
         ${rows.map(row => `<span class="meta-pill">${row}</span>`).join("")}
       </div>
     </article>
+  `;
+}
+
+function renderLeaderboardTitle(userId, rank, backId) {
+  const playerName = getUserName(userId);
+  return `
+    <div class="leaderboard-card-title">
+      <span class="leaderboard-rank">#${rank}</span>
+      ${renderActivityPlayerBadge(playerName, "tracked", userId, backId)}
+    </div>
   `;
 }
 
@@ -4196,7 +4361,7 @@ function getOrCreateEventProfile(eventId, userId) {
       userId,
       pod: "Pod 1",
       deckColors: "",
-      archetype: ""
+      archetype: []
     };
     eventProfiles.push(profile);
   }
@@ -4368,6 +4533,11 @@ function getDeckColorLabel(value) {
   }
 
   return value;
+}
+
+function getArchetypeLabel(value) {
+  const archetypes = normalizeArchetypes(value);
+  return archetypes.length ? archetypes.join(", ") : "No archetype";
 }
 
 function getMostPlayedSet() {

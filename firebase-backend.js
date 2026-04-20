@@ -76,6 +76,18 @@ function coerceNumber(value) {
   return Number.isFinite(parsed) ? parsed : value;
 }
 
+function normalizeArchetypes(value) {
+  if (Array.isArray(value)) {
+    return [...new Set(value.map(entry => String(entry || "").trim()).filter(Boolean))];
+  }
+
+  if (typeof value === "string") {
+    return value.trim() ? [value.trim()] : [];
+  }
+
+  return [];
+}
+
 async function readCollection(name) {
   if (!firebaseReady) {
     return [];
@@ -244,7 +256,8 @@ export async function loadPersistedState() {
       .map(profile => ({
         ...profile,
         eventId: coerceNumber(profile.eventId),
-        userId: normalizeUserId(profile.userId)
+        userId: normalizeUserId(profile.userId),
+        archetype: normalizeArchetypes(profile.archetype)
       }))
       .filter(profile => profile.userId),
     matchEntries: matchEntries
@@ -254,7 +267,8 @@ export async function loadPersistedState() {
         eventId: coerceNumber(entry.eventId),
         userId: normalizeUserId(entry.userId),
         opponentUserId: entry.opponentUserId == null ? null : normalizeUserId(entry.opponentUserId),
-        round: Number(entry.round) || 1
+        round: Number(entry.round) || 1,
+        archetype: normalizeArchetypes(entry.archetype)
       }))
       .filter(entry => entry.userId)
   };
@@ -374,7 +388,7 @@ export async function saveEventProfile(profile) {
       userId: normalizeUserId(profile.userId),
       pod: profile.pod,
       deckColors: profile.deckColors,
-      archetype: profile.archetype
+      archetype: normalizeArchetypes(profile.archetype)
     })
   );
 }
@@ -397,7 +411,8 @@ export async function saveMatchEntry(matchEntry) {
     withTimestamp({
       ...matchEntry,
       userId: normalizeUserId(matchEntry.userId),
-      opponentUserId: matchEntry.opponentUserId == null ? null : normalizeUserId(matchEntry.opponentUserId)
+      opponentUserId: matchEntry.opponentUserId == null ? null : normalizeUserId(matchEntry.opponentUserId),
+      archetype: normalizeArchetypes(matchEntry.archetype)
     })
   );
 }

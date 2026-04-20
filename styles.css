@@ -436,6 +436,16 @@ small,
   color: #111827;
 }
 
+#archetype-select[multiple] {
+  min-height: 8.75rem;
+  padding: 0.75rem 1rem;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+#archetype-select[multiple] option {
+  padding: 0.35rem 0.25rem;
+}
+
 .form-control::placeholder,
 textarea.form-control::placeholder,
 input.form-control::placeholder {
@@ -1398,6 +1408,20 @@ body.account-modal-open {
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
+}
+
+.leaderboard-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.leaderboard-rank {
+  flex: 0 0 auto;
+  font-weight: 800;
+  color: #ffd8bc;
+  letter-spacing: 0.04em;
 }
 
 .activity-player-badge {

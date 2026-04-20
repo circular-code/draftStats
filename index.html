@@ -248,12 +248,11 @@
                 <select class="form-select" id="deck-color-select"></select>
               </div>
               <div>
-                <label class="form-label" for="archetype-select">Archetype</label>
-                <div class="select-wrap">
-                  <select class="form-select has-caret" id="archetype-select"></select>
-                  <span class="select-caret" aria-hidden="true"></span>
+                <label class="form-label" for="archetype-select">Archetypes</label>
+                <div class="select-wrap no-caret">
+                  <select class="form-select" id="archetype-select" multiple size="5" aria-describedby="archetype-select-hint"></select>
                 </div>
-                </div>
+                <div class="small text-secondary mt-2" id="archetype-select-hint">Choose one or more archetypes for this event.</div>
               </div>
             </div>
 
