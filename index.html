@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DraftStats Limited Prototype</title>
+  <title>100% Tilt limited tracking</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/tom-select/dist/css/tom-select.css" rel="stylesheet">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -13,49 +13,57 @@
 </head>
 <body>
   <main class="app-shell">
+    <button class="account-menu-button d-none" id="account-menu-button" type="button" aria-label="Open account menu">
+      <span class="account-menu-avatar" id="account-menu-avatar" aria-hidden="true">
+        <span class="account-menu-avatar-core">
+          <svg class="account-menu-icon" viewBox="0 0 24 24" focusable="false">
+            <path d="M12 12.2a4.1 4.1 0 1 0-4.1-4.1 4.1 4.1 0 0 0 4.1 4.1Zm0 2.05c-4 0-7.25 2.18-7.25 4.87A.88.88 0 0 0 5.63 20h12.74a.88.88 0 0 0 .88-.88c0-2.69-3.25-4.87-7.25-4.87Z"></path>
+          </svg>
+        </span>
+      </span>
+    </button>
+
     <section class="screen active" id="screen-start">
+      <div class="topbar topbar-spacer" aria-hidden="true"></div>
       <div class="hero-card card shadow-lg border-0">
         <div class="card-body p-4 p-sm-5">
-          <p class="eyebrow mb-2">DraftStats</p>
-          <h1 class="display-title mb-3">Track limited nights, matchups, and rivalries over time.</h1>
-            <p class="text-secondary mb-4">
-              Pick who is logging data, jump into match entry, or dive into global, friend, and personal limited stats.
-            </p>
+          <p class="eyebrow mb-2">100% TILT PRESENTS</p>
+          <h1 class="display-title mb-3">Limited Event Tracking</h1>
+          <p class="text-secondary mb-4">
+            Sign in with Google or email, choose the nickname you want to be known by, then jump into match entry or browse the shared stats views.
+          </p>
 
-          <div class="mb-3">
-            <label class="form-label" for="active-user-select">Tracking as</label>
-            <div class="select-wrap">
-              <select class="form-select form-select-lg has-caret required-field" id="active-user-select"></select>
-              <span class="select-caret" aria-hidden="true"></span>
+          <div class="alert alert-warning d-none mb-4" id="user-alert" role="alert"></div>
+
+          <div class="action-row mb-3">
+            <div class="welcome-banner d-none" id="welcome-message"></div>
+            <button class="btn btn-accent btn-lg w-100" id="track-button" type="button">Track</button>
+            <div class="auth-primary-row d-none" id="auth-primary-row">
+              <button class="btn btn-accent btn-lg w-100" id="primary-register-button" type="button">Register</button>
+              <button class="btn btn-outline-light btn-lg w-100" id="primary-login-button" type="button">Login</button>
             </div>
           </div>
 
-          <div class="mb-3">
-            <label class="form-label" for="new-user-input">Register new user</label>
-            <div class="row g-2">
-              <div class="col-8">
-                <input class="form-control form-control-lg" id="new-user-input" type="text" maxlength="40" placeholder="Enter display name">
-              </div>
-              <div class="col-4">
-                <button class="btn btn-outline-light w-100 h-100" id="create-user-button" type="button">Create</button>
-              </div>
+          <div class="auth-google-launch d-none mb-4" id="auth-google-launch">
+            <div class="auth-launch-divider" aria-hidden="true">
+              <span>or</span>
+            </div>
+            <button class="btn btn-outline-light btn-lg w-100" id="google-sign-in-button" type="button">Continue with Google</button>
+          </div>
+
+          <div class="stats-shortcuts-block" id="stats-shortcuts-block">
+            <h3 class="small-heading mb-3">Stats</h3>
+            <div class="stats-shortcuts">
+              <button class="btn btn-outline-light btn-lg w-100" id="global-stats-button" type="button">Global</button>
+              <button class="btn btn-outline-light btn-lg w-100" id="friends-stats-button" type="button">Friends</button>
+              <button class="btn btn-outline-light btn-lg w-100" id="personal-stats-button" type="button">Personal</button>
             </div>
           </div>
 
-            <div class="alert alert-warning d-none mb-4" id="user-alert" role="alert"></div>
-
-            <div class="action-row mb-3">
-              <button class="btn btn-accent btn-lg w-100" id="track-button" type="button">Track</button>
-            </div>
-
-            <div class="stats-shortcuts-block">
-              <h3 class="small-heading mb-3">Stats</h3>
-              <div class="stats-shortcuts">
-                <button class="btn btn-outline-light btn-lg w-100" id="global-stats-button" type="button">Global</button>
-                <button class="btn btn-outline-light btn-lg w-100" id="friends-stats-button" type="button">Friends</button>
-                <button class="btn btn-outline-light btn-lg w-100" id="personal-stats-button" type="button">Personal</button>
-              </div>
-            </div>
+          <div class="stats-section mt-4">
+            <h3 class="small-heading mb-3">Recent Activity</h3>
+            <div class="list-stack" id="activity-feed"></div>
+          </div>
           </div>
         </div>
       </section>
@@ -101,6 +109,21 @@
             </div>
             <div class="event-list" id="date-event-list"></div>
             <p class="small text-secondary mt-2 mb-0 d-none" id="date-event-empty">No existing event found for this date.</p>
+          </div>
+
+          <div class="admin-tools d-none mt-3" id="admin-event-tools">
+            <label class="form-label" for="remove-event-select">Delete event</label>
+            <div class="row g-2">
+              <div class="col-8">
+                <div class="select-wrap">
+                  <select class="form-select form-select-lg has-caret" id="remove-event-select"></select>
+                  <span class="select-caret" aria-hidden="true"></span>
+                </div>
+              </div>
+              <div class="col-4">
+                <button class="btn btn-outline-danger w-100 h-100" id="remove-event-button" type="button">Delete</button>
+              </div>
+            </div>
           </div>
 
           <div class="create-divider mt-4 mb-3">
@@ -180,6 +203,21 @@
               </div>
             </div>
 
+            <div class="admin-tools d-none mt-3" id="admin-location-tools">
+              <label class="form-label" for="remove-location-select">Remove location</label>
+              <div class="row g-2">
+                <div class="col-8">
+                  <div class="select-wrap">
+                    <select class="form-select form-select-lg has-caret" id="remove-location-select"></select>
+                    <span class="select-caret" aria-hidden="true"></span>
+                  </div>
+                </div>
+                <div class="col-4">
+                  <button class="btn btn-outline-danger w-100 h-100" id="remove-location-button" type="button">Remove</button>
+                </div>
+              </div>
+            </div>
+
             <div class="d-grid mt-4">
               <button class="btn btn-accent btn-lg" id="save-event-button" type="submit">Save / Create</button>
             </div>
@@ -245,6 +283,21 @@
                   </div>
                   <div class="col-4">
                     <button class="btn btn-outline-light w-100 h-100" id="create-opponent-button" type="button">Add</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="admin-tools d-none mb-3" id="admin-opponent-tools">
+                <label class="form-label" for="remove-opponent-select">Remove opponent</label>
+                <div class="row g-2">
+                  <div class="col-8">
+                    <div class="select-wrap">
+                      <select class="form-select form-select-lg has-caret" id="remove-opponent-select"></select>
+                      <span class="select-caret" aria-hidden="true"></span>
+                    </div>
+                  </div>
+                  <div class="col-4">
+                    <button class="btn btn-outline-danger w-100 h-100" id="remove-opponent-button" type="button">Remove</button>
                   </div>
                 </div>
               </div>
@@ -347,22 +400,22 @@
               <button class="btn btn-outline-light btn-sm stats-nav-button is-active" data-stats-view="personal" type="button">Personal</button>
             </div>
 
-            <p class="eyebrow mb-2">Personal</p>
-            <h2 class="section-title mb-2">Your stats</h2>
-            <p class="text-secondary mb-4" id="personal-stats-subtitle">Stats for the selected user.</p>
+            <p class="eyebrow mb-2" id="personal-stats-eyebrow">Personal</p>
+            <h2 class="section-title mb-2" id="personal-stats-title">Your stats</h2>
+            <p class="text-secondary mb-4" id="personal-stats-subtitle">Stats for your nickname.</p>
 
             <div class="stats-section">
-              <h3 class="small-heading mb-3">Your snapshot</h3>
+              <h3 class="small-heading mb-3" id="personal-stats-snapshot-heading">Snapshot</h3>
               <div class="list-stack" id="stats-personal"></div>
             </div>
 
             <div class="stats-section">
-              <h3 class="small-heading mb-3">Head-to-head</h3>
+              <h3 class="small-heading mb-3" id="personal-stats-head-to-head-heading">Head-to-head</h3>
               <div class="list-stack" id="personal-head-to-head"></div>
             </div>
 
             <div class="stats-section">
-              <h3 class="small-heading mb-3">Your event history</h3>
+              <h3 class="small-heading mb-3" id="personal-stats-history-heading">Event history</h3>
               <div class="list-stack" id="stats-history"></div>
           </div>
         </div>
@@ -370,8 +423,146 @@
     </section>
   </main>
 
+  <div class="account-modal-shell d-none" id="auth-modal-shell" aria-hidden="true">
+    <div class="account-modal-backdrop" id="auth-modal-backdrop"></div>
+    <section class="account-modal auth-modal card shadow-lg border-0" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
+      <div class="account-modal-header">
+        <div>
+          <p class="eyebrow mb-2">Account</p>
+          <h2 class="section-title mb-1" id="auth-modal-title">Sign in or register</h2>
+          <p class="text-secondary mb-0" id="auth-modal-hint">Use Google or email, then choose the nickname players should know you by.</p>
+        </div>
+        <button class="account-modal-close" id="auth-modal-close" type="button" aria-label="Close sign-in modal">&times;</button>
+      </div>
+
+      <div class="alert alert-warning d-none mb-3" id="auth-modal-alert" role="alert"></div>
+
+      <section class="auth-card" id="auth-signed-out">
+        <div class="mb-3" id="auth-nickname-row">
+          <label class="form-label" for="register-nickname-input">Nickname</label>
+          <input class="form-control form-control-lg required-field" id="register-nickname-input" type="text" maxlength="40" placeholder="What should players call you?">
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label" for="email-input">Email</label>
+          <input class="form-control form-control-lg required-field" id="email-input" type="email" maxlength="120" placeholder="you@example.com">
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label" for="password-input">Password</label>
+          <input class="form-control form-control-lg required-field" id="password-input" type="password" maxlength="120" placeholder="At least 6 characters">
+        </div>
+
+        <div class="auth-inline-action d-none" id="forgot-password-row">
+          <button class="auth-link-button" id="forgot-password-button" type="button">Forgot password?</button>
+        </div>
+
+        <div class="auth-actions">
+          <button class="btn btn-accent btn-lg w-100" id="email-register-button" type="button">Create account</button>
+          <button class="btn btn-outline-light btn-lg w-100" id="email-sign-in-button" type="button">Sign in</button>
+        </div>
+      </section>
+    </section>
+  </div>
+
+  <div class="account-modal-shell d-none" id="account-modal-shell" aria-hidden="true">
+    <div class="account-modal-backdrop" id="account-modal-backdrop"></div>
+    <section class="account-modal card shadow-lg border-0" id="account-modal" role="dialog" aria-modal="true" aria-labelledby="account-modal-title">
+      <div class="account-modal-header">
+        <div>
+          <p class="eyebrow mb-2">Account</p>
+          <h2 class="section-title mb-1" id="account-modal-title">User menu</h2>
+          <p class="text-secondary mb-0" id="account-modal-hint">Manage your nickname and sign-in settings.</p>
+        </div>
+        <button class="account-modal-close" id="account-modal-close" type="button" aria-label="Close account menu">&times;</button>
+      </div>
+
+      <div class="account-modal-meta">
+        <span class="meta-pill" id="account-email-pill">Not signed in</span>
+      </div>
+
+      <div class="alert alert-warning d-none mb-3" id="account-modal-alert" role="alert"></div>
+
+      <div class="account-modal-section">
+        <label class="form-label" for="nickname-input">Nickname</label>
+        <div class="row g-2">
+          <div class="col-8">
+            <input class="form-control form-control-lg required-field" id="nickname-input" type="text" maxlength="40" placeholder="Your in-app nickname">
+          </div>
+          <div class="col-4">
+            <button class="btn btn-outline-light w-100 h-100" id="save-nickname-button" type="button">Save profile</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="account-modal-section">
+        <label class="form-label">Profile style</label>
+        <div class="profile-style-card">
+          <div class="profile-style-preview">
+            <span class="player-avatar-shell account-style-avatar" id="account-style-preview-avatar" aria-hidden="true">
+              <span class="player-avatar-core" id="account-style-preview-core">ST</span>
+            </span>
+            <div class="profile-style-copy">
+              <div class="fw-bold" id="account-style-preview-name">Your profile</div>
+              <div class="small text-secondary" id="account-style-preview-hint">Pick a custom accent color for your avatar.</div>
+            </div>
+          </div>
+          <div class="profile-style-group">
+            <label class="small text-secondary mb-2" for="profile-color-input">Accent color</label>
+            <div class="profile-color-picker-row">
+              <input class="profile-color-input" id="profile-color-input" type="color" value="#ff7a18">
+              <span class="profile-color-value" id="profile-color-value">#FF7A18</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="account-modal-section d-none" id="password-section">
+        <label class="form-label" for="current-password-input">Change password</label>
+        <div class="account-form-stack">
+          <input class="form-control form-control-lg" id="current-password-input" type="password" maxlength="120" placeholder="Current password">
+          <input class="form-control form-control-lg" id="new-password-input" type="password" maxlength="120" placeholder="New password">
+          <input class="form-control form-control-lg" id="confirm-password-input" type="password" maxlength="120" placeholder="Confirm new password">
+          <button class="btn btn-outline-light btn-lg w-100" id="change-password-button" type="button">Update password</button>
+        </div>
+      </div>
+
+      <div class="account-modal-section d-none" id="password-unavailable-note">
+        <div class="account-note">
+          This account signs in without a password.
+        </div>
+      </div>
+
+      <div class="account-modal-actions">
+        <button class="btn btn-outline-light" id="sign-out-button" type="button">Sign out</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="account-modal-shell d-none" id="round-prefill-modal-shell" aria-hidden="true">
+    <div class="account-modal-backdrop" id="round-prefill-modal-backdrop"></div>
+    <section class="account-modal card shadow-lg border-0" role="dialog" aria-modal="true" aria-labelledby="round-prefill-title">
+      <div class="account-modal-header">
+        <div>
+          <p class="eyebrow mb-2">Match Sync</p>
+          <h2 class="section-title mb-1" id="round-prefill-title">Round already entered</h2>
+          <p class="text-secondary mb-0" id="round-prefill-message">This round was already entered by your opponent.</p>
+        </div>
+        <button class="account-modal-close" id="round-prefill-modal-close" type="button" aria-label="Close round sync message">&times;</button>
+      </div>
+
+      <div class="account-note mb-3">
+        The round has been prefilled from their entry. You can keep it as-is or edit it, and your save will update the shared match data.
+      </div>
+
+      <div class="account-modal-actions">
+        <button class="btn btn-outline-light" id="round-prefill-acknowledge-button" type="button">Continue</button>
+      </div>
+    </section>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/tom-select/dist/js/tom-select.complete.min.js"></script>
   <script src="./set-catalog.js"></script>
-  <script src="./app.js"></script>
+  <script type="module" src="./app.js"></script>
 </body>
 </html>

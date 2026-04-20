@@ -1,3 +1,30 @@
+import {
+  changeCurrentUserPassword,
+  deleteCustomLocation,
+  deleteEvent,
+  deleteLegacyCustomUser,
+  deleteEventProfile,
+  deleteMatchEntry,
+  deleteCustomOpponent,
+  initializeFirebasePersistence,
+  isFirebasePersistenceEnabled,
+  loadPersistedState,
+  loadUserProfile,
+  requestPasswordReset,
+  saveCustomLocation,
+  saveCustomOpponent,
+  saveEvent,
+  saveEventProfile,
+  saveMatchEntry,
+  saveUserProfile,
+  signInWithEmail,
+  signInWithGoogle,
+  signOutCurrentUser,
+  signUpWithEmail,
+  subscribeToAuthState,
+  updateAuthNickname
+} from "./firebase-backend.js";
+
 const seededSetCatalog = [
   { code: "DFT", name: "Aetherdrift", color: "linear-gradient(135deg, #ff7a18, #ffb347)", iconSvgUri: "" },
   { code: "TDM", name: "Tarkir: Dragonstorm", color: "linear-gradient(135deg, #00a896, #7dd3fc)", iconSvgUri: "" },
@@ -12,7 +39,7 @@ const neutralSetColor = "linear-gradient(135deg, #64748b, #94a3b8)";
 const formatColors = {
   Draft: "linear-gradient(135deg, #ff7a18, #ffb347)",
   Sealed: "linear-gradient(135deg, #00a896, #7dd3fc)",
-  Mixed: "linear-gradient(135deg, #ff7a18, #7dd3fc)"
+  Mixed: "linear-gradient(to bottom left, #ffb347 0 50%, #7dd3fc 50% 100%)"
 };
 
 function getNormalizedFormat(format) {
@@ -67,12 +94,14 @@ const enhancedSelects = {
 };
 
 const manaSymbolFallbacks = {
-  W: { label: "W", className: "white" },
-  U: { label: "U", className: "blue" },
-  B: { label: "B", className: "black" },
-  R: { label: "R", className: "red" },
-  G: { label: "G", className: "green" }
+  W: { label: "White mana", className: "white" },
+  U: { label: "Blue mana", className: "blue" },
+  B: { label: "Black mana", className: "black" },
+  R: { label: "Red mana", className: "red" },
+  G: { label: "Green mana", className: "green" }
 };
+
+const defaultAccentColor = "#ff7a18";
 
 const colorGroups = [
   {
@@ -149,34 +178,16 @@ const archetypeOptions = [
   "Spellslinger"
 ];
 
-const users = [
-  { id: 1, name: "Alex" },
-  { id: 2, name: "Berni" },
-  { id: 3, name: "Dennis" },
-  { id: 4, name: "Duc" },
-  { id: 5, name: "Ersin" },
-  { id: 6, name: "Jonas" },
-  { id: 7, name: "Kevin Schweizer" },
-  { id: 8, name: "Kevin Thies" },
-  { id: 9, name: "Leo" },
-  { id: 10, name: "Sergej" },
-  { id: 11, name: "Steph" },
-  { id: 12, name: "Tilman" }
-];
+const users = [];
+const userProfiles = [];
+const legacyUsers = [];
 
-const baseLocations = [
-  "Fantasy Stronghold",
-  "Sendepause",
-  "unschlagBar"
-];
+const baseLocations = [];
 
 const customLocations = [];
 const customOpponents = [];
 
-const events = [
-  { id: 1, date: "2026-04-19", set: "TDM", index: 1, location: "Fantasy Stronghold", format: "Draft", rounds: 3, podCount: 1 },
-  { id: 2, date: "2026-04-19", set: "DFT", index: 1, location: "Sendepause", format: "Draft", rounds: 3, podCount: 1 }
-];
+const events = [];
 
 const eventPods = [];
 const eventProfiles = [];
@@ -187,11 +198,21 @@ let currentCalendarMonth = "";
 let currentEventId = null;
 let currentMatchBack = "screen-date";
 let activeUserId = null;
+let viewedPersonalStatsSubject = null;
+let currentAuthUser = null;
+let authResolved = false;
+let authBusy = false;
+let needsNicknameSetup = false;
+let isAuthModalOpen = false;
+let authModalMode = "register";
+let isAccountModalOpen = false;
+let isRoundPrefillModalOpen = false;
+let lastShownRoundPrefillKey = "";
 let currentSelectedRound = 1;
-let nextUserId = users.length + 1;
 let nextEventId = events.length + 1;
 let nextMatchId = 1;
 let currentScore = "2-0";
+let pendingAccentColor = defaultAccentColor;
 let matchInteractionState = {
   opponent: false,
   score: false
@@ -212,9 +233,65 @@ const elements = {
   globalStatsButton: document.getElementById("global-stats-button"),
   friendsStatsButton: document.getElementById("friends-stats-button"),
   personalStatsButton: document.getElementById("personal-stats-button"),
-  activeUserSelect: document.getElementById("active-user-select"),
-  newUserInput: document.getElementById("new-user-input"),
-  createUserButton: document.getElementById("create-user-button"),
+  statsShortcutsBlock: document.getElementById("stats-shortcuts-block"),
+  authPrimaryRow: document.getElementById("auth-primary-row"),
+  authGoogleLaunch: document.getElementById("auth-google-launch"),
+  primaryRegisterButton: document.getElementById("primary-register-button"),
+  primaryLoginButton: document.getElementById("primary-login-button"),
+  welcomeMessage: document.getElementById("welcome-message"),
+  accountMenuButton: document.getElementById("account-menu-button"),
+  accountMenuAvatar: document.getElementById("account-menu-avatar"),
+  authModalShell: document.getElementById("auth-modal-shell"),
+  authModalBackdrop: document.getElementById("auth-modal-backdrop"),
+  authModalClose: document.getElementById("auth-modal-close"),
+  authModalTitle: document.getElementById("auth-modal-title"),
+  authModalHint: document.getElementById("auth-modal-hint"),
+  authModalAlert: document.getElementById("auth-modal-alert"),
+  authNicknameRow: document.getElementById("auth-nickname-row"),
+  authSignedOut: document.getElementById("auth-signed-out"),
+  googleSignInButton: document.getElementById("google-sign-in-button"),
+  emailInput: document.getElementById("email-input"),
+  passwordInput: document.getElementById("password-input"),
+  forgotPasswordRow: document.getElementById("forgot-password-row"),
+  forgotPasswordButton: document.getElementById("forgot-password-button"),
+  registerNicknameInput: document.getElementById("register-nickname-input"),
+  emailSignInButton: document.getElementById("email-sign-in-button"),
+  emailRegisterButton: document.getElementById("email-register-button"),
+  accountModalShell: document.getElementById("account-modal-shell"),
+  accountModalBackdrop: document.getElementById("account-modal-backdrop"),
+  accountModal: document.getElementById("account-modal"),
+  accountModalClose: document.getElementById("account-modal-close"),
+  accountModalHint: document.getElementById("account-modal-hint"),
+  accountEmailPill: document.getElementById("account-email-pill"),
+  accountModalAlert: document.getElementById("account-modal-alert"),
+  accountStylePreviewAvatar: document.getElementById("account-style-preview-avatar"),
+  accountStylePreviewCore: document.getElementById("account-style-preview-core"),
+  accountStylePreviewName: document.getElementById("account-style-preview-name"),
+  profileColorInput: document.getElementById("profile-color-input"),
+  profileColorValue: document.getElementById("profile-color-value"),
+  roundPrefillModalShell: document.getElementById("round-prefill-modal-shell"),
+  roundPrefillModalBackdrop: document.getElementById("round-prefill-modal-backdrop"),
+  roundPrefillModalClose: document.getElementById("round-prefill-modal-close"),
+  roundPrefillMessage: document.getElementById("round-prefill-message"),
+  roundPrefillAcknowledgeButton: document.getElementById("round-prefill-acknowledge-button"),
+  nicknameInput: document.getElementById("nickname-input"),
+  saveNicknameButton: document.getElementById("save-nickname-button"),
+  passwordSection: document.getElementById("password-section"),
+  passwordUnavailableNote: document.getElementById("password-unavailable-note"),
+  currentPasswordInput: document.getElementById("current-password-input"),
+  newPasswordInput: document.getElementById("new-password-input"),
+  confirmPasswordInput: document.getElementById("confirm-password-input"),
+  changePasswordButton: document.getElementById("change-password-button"),
+  signOutButton: document.getElementById("sign-out-button"),
+  adminLocationTools: document.getElementById("admin-location-tools"),
+  removeLocationSelect: document.getElementById("remove-location-select"),
+  removeLocationButton: document.getElementById("remove-location-button"),
+  adminEventTools: document.getElementById("admin-event-tools"),
+  removeEventSelect: document.getElementById("remove-event-select"),
+  removeEventButton: document.getElementById("remove-event-button"),
+  adminOpponentTools: document.getElementById("admin-opponent-tools"),
+  removeOpponentSelect: document.getElementById("remove-opponent-select"),
+  removeOpponentButton: document.getElementById("remove-opponent-button"),
   userAlert: document.getElementById("user-alert"),
   dateInput: document.getElementById("event-date"),
   calendarTodayButton: document.getElementById("calendar-today-button"),
@@ -260,16 +337,28 @@ const elements = {
   friendsOverviewGrid: document.getElementById("friends-overview-grid"),
   friendsLeaderboard: document.getElementById("friends-leaderboard"),
   friendsRivalries: document.getElementById("friends-rivalries"),
+  activityFeed: document.getElementById("activity-feed"),
   statsHistory: document.getElementById("stats-history"),
   statsPersonal: document.getElementById("stats-personal"),
   personalHeadToHead: document.getElementById("personal-head-to-head"),
   personalStatsBackButton: document.getElementById("personal-stats-back-button"),
-  personalStatsSubtitle: document.getElementById("personal-stats-subtitle")
+  personalStatsEyebrow: document.getElementById("personal-stats-eyebrow"),
+  personalStatsTitle: document.getElementById("personal-stats-title"),
+  personalStatsSubtitle: document.getElementById("personal-stats-subtitle"),
+  personalStatsSnapshotHeading: document.getElementById("personal-stats-snapshot-heading"),
+  personalStatsHeadToHeadHeading: document.getElementById("personal-stats-head-to-head-heading"),
+  personalStatsHistoryHeading: document.getElementById("personal-stats-history-heading")
 };
 
-function init() {
+async function init() {
+  try {
+    await initializeFirebasePersistence();
+    await hydratePersistedState();
+  } catch (error) {
+    console.error("Failed to initialize Firebase persistence.", error);
+  }
+
   populateSetSelect();
-  populateUserSelect();
   populateLocationSelect();
   populateDeckColorSelect();
   populateArchetypeSelect();
@@ -281,15 +370,48 @@ function init() {
   loadSetCatalogFromScryfall();
   loadManaSymbolCatalogFromScryfall();
 
-  [elements.activeUserSelect, elements.eventFormatSelect, elements.locationSelect, elements.podSelect, elements.archetypeSelect, elements.opponentSelect].forEach(wireSelectCaret);
+  [
+    elements.eventFormatSelect,
+    elements.locationSelect,
+    elements.podSelect,
+    elements.archetypeSelect,
+    elements.opponentSelect,
+    elements.removeEventSelect,
+    elements.removeLocationSelect,
+    elements.removeOpponentSelect
+  ].forEach(wireSelectCaret);
 
   elements.trackButton.addEventListener("click", handleTrackStart);
   elements.globalStatsButton.addEventListener("click", () => openGlobalStats("screen-start"));
   elements.friendsStatsButton.addEventListener("click", () => openFriendsStats("screen-start"));
   elements.personalStatsButton.addEventListener("click", () => openPersonalStats("screen-start"));
-  elements.activeUserSelect.addEventListener("change", handleActiveUserChange);
-  elements.createUserButton.addEventListener("click", handleCreateUser);
-  elements.newUserInput.addEventListener("keydown", handleEnterToCreateUser);
+  elements.googleSignInButton?.addEventListener("click", handleGoogleSignIn);
+  elements.emailSignInButton?.addEventListener("click", handleEmailSignIn);
+  elements.emailRegisterButton?.addEventListener("click", handleEmailRegister);
+  elements.forgotPasswordButton?.addEventListener("click", handleForgotPasswordReset);
+  elements.primaryRegisterButton?.addEventListener("click", () => openAuthModal("register"));
+  elements.primaryLoginButton?.addEventListener("click", () => openAuthModal("login"));
+  elements.authModalClose?.addEventListener("click", closeAuthModal);
+  elements.authModalBackdrop?.addEventListener("click", closeAuthModal);
+  elements.accountMenuButton?.addEventListener("click", openAccountModal);
+  elements.accountModalClose?.addEventListener("click", closeAccountModal);
+  elements.accountModalBackdrop?.addEventListener("click", closeAccountModal);
+  elements.roundPrefillModalClose?.addEventListener("click", closeRoundPrefillModal);
+  elements.roundPrefillModalBackdrop?.addEventListener("click", closeRoundPrefillModal);
+  elements.roundPrefillAcknowledgeButton?.addEventListener("click", closeRoundPrefillModal);
+  elements.saveNicknameButton?.addEventListener("click", handleSaveNickname);
+  elements.changePasswordButton?.addEventListener("click", handleChangePassword);
+  elements.signOutButton?.addEventListener("click", handleSignOut);
+  elements.profileColorInput?.addEventListener("input", handleAccentColorInput);
+  elements.nicknameInput?.addEventListener("input", updateProfileStylePreview);
+  elements.passwordInput?.addEventListener("keydown", handleAuthPasswordKeydown);
+  elements.registerNicknameInput?.addEventListener("keydown", handleRegisterNicknameKeydown);
+  elements.nicknameInput?.addEventListener("keydown", handleNicknameSaveKeydown);
+  [
+    elements.currentPasswordInput,
+    elements.newPasswordInput,
+    elements.confirmPasswordInput
+  ].forEach(input => input?.addEventListener("keydown", handlePasswordChangeKeydown));
   elements.calendarTodayButton.addEventListener("click", handleCalendarToday);
   elements.calendarPrevButton.addEventListener("click", () => shiftCalendarMonth(-1));
   elements.calendarNextButton.addEventListener("click", () => shiftCalendarMonth(1));
@@ -301,8 +423,11 @@ function init() {
     updatePotentialDuplicateNotice();
   });
   elements.createLocationButton.addEventListener("click", handleCreateLocation);
+  elements.removeLocationButton?.addEventListener("click", handleRemoveLocation);
+  elements.removeEventButton?.addEventListener("click", handleRemoveEvent);
   elements.newLocationInput.addEventListener("keydown", handleEnterToCreateLocation);
   elements.createOpponentButton.addEventListener("click", handleCreateOpponent);
+  elements.removeOpponentButton?.addEventListener("click", handleRemoveOpponent);
   elements.newOpponentInput.addEventListener("keydown", handleEnterToCreateOpponent);
   elements.podSelect.addEventListener("change", saveCurrentProfile);
   elements.deckColorSelect.addEventListener("change", saveCurrentProfile);
@@ -312,6 +437,8 @@ function init() {
   elements.matchNotesInput.addEventListener("input", handleMatchNotesInput);
   elements.saveMatchButton.addEventListener("click", handleDoneWithMatch);
   elements.scoreRow.addEventListener("click", handleScoreClick);
+  elements.activityFeed?.addEventListener("click", handlePlayerStatsNavigationClick);
+  elements.dateEventList?.addEventListener("click", handlePlayerStatsNavigationClick);
 
   elements.locationSelect.addEventListener("input", updatePotentialDuplicateNotice);
 
@@ -332,7 +459,347 @@ function init() {
     });
   });
 
+  document.addEventListener("keydown", handleGlobalKeydown);
+
   updateScoreUi();
+  updateAdminUiState();
+  renderActivityFeed();
+  renderAuthUi();
+  subscribeToAuthState(handleAuthStateChange);
+}
+
+async function hydratePersistedState() {
+  const persistedState = await loadPersistedState();
+
+  mergePersistedUsers(persistedState.userProfiles || []);
+  mergeLegacyUsers(persistedState.legacyUsers || []);
+  replaceStringCollection(customLocations, persistedState.customLocations || []);
+  replaceStringCollection(customOpponents, persistedState.customOpponents || []);
+  mergePersistedEvents(persistedState.events || []);
+
+  eventProfiles.splice(0, eventProfiles.length, ...(persistedState.eventProfiles || []));
+  matchEntries.splice(0, matchEntries.length, ...(persistedState.matchEntries || []));
+  eventPods.splice(0, eventPods.length);
+
+  nextEventId = Math.max(...events.map(event => Number(event.id) || 0), 0) + 1;
+  nextMatchId = Math.max(...matchEntries.map(entry => Number(entry.id) || 0), 0) + 1;
+}
+
+function mergePersistedUsers(persistedUsers) {
+  persistedUsers.forEach(user => {
+    if (!user?.id) {
+      return;
+    }
+
+    const normalizedId = normalizeUserId(user.id);
+    const existingIndex = userProfiles.findIndex(entry => entry.id === normalizedId);
+    if (existingIndex !== -1) {
+      userProfiles[existingIndex] = {
+        ...userProfiles[existingIndex],
+        id: normalizedId,
+        nickname: user.nickname || userProfiles[existingIndex].nickname || "",
+        provider: user.provider || userProfiles[existingIndex].provider || "",
+        accentColor: sanitizeAccentColor(
+          user.accentColor ||
+          user.accentTheme ||
+          userProfiles[existingIndex].accentColor ||
+          userProfiles[existingIndex].accentTheme
+        )
+      };
+    } else {
+      userProfiles.push({
+        id: normalizedId,
+        nickname: user.nickname || "",
+        provider: user.provider || "",
+        accentColor: sanitizeAccentColor(user.accentColor || user.accentTheme)
+      });
+    }
+  });
+
+  rebuildUsers();
+}
+
+function mergeLegacyUsers(persistedUsers) {
+  persistedUsers.forEach(user => {
+    if (!user?.id || !user?.name) {
+      return;
+    }
+
+    const normalizedId = normalizeUserId(user.id);
+    const existingIndex = legacyUsers.findIndex(entry => entry.id === normalizedId);
+    if (existingIndex !== -1) {
+      legacyUsers[existingIndex] = {
+        ...legacyUsers[existingIndex],
+        id: normalizedId,
+        name: user.name
+      };
+    } else {
+      legacyUsers.push({
+        id: normalizedId,
+        name: user.name
+      });
+    }
+  });
+
+  rebuildUsers();
+}
+
+function rebuildUsers() {
+  users.splice(0, users.length);
+
+  userProfiles
+    .filter(user => user.nickname)
+    .forEach(user => {
+      users.push({
+        id: normalizeUserId(user.id),
+        name: user.nickname,
+        source: "auth",
+        accentColor: sanitizeAccentColor(user.accentColor || user.accentTheme)
+      });
+    });
+
+  legacyUsers
+    .filter(user => !userProfiles.some(profile => profile.nickname && normalize(profile.nickname) === normalize(user.name)))
+    .forEach(user => {
+      users.push({
+        id: normalizeUserId(user.id),
+        name: user.name,
+        source: "legacy"
+      });
+    });
+
+  users.sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function replaceStringCollection(targetCollection, values) {
+  targetCollection.splice(0, targetCollection.length, ...dedupeStrings(values.filter(Boolean)));
+}
+
+function normalizeUserId(value) {
+  return value == null ? "" : String(value);
+}
+
+function compareUserIds(left, right) {
+  return String(left).localeCompare(String(right));
+}
+
+function getProviderLabel(user) {
+  if (!user?.providerData?.length) {
+    return "password";
+  }
+
+  return user.providerData.some(entry => entry.providerId === "google.com") ? "google" : "password";
+}
+
+function getActiveUserRecord() {
+  return activeUserId ? getUserRecord(activeUserId) : null;
+}
+
+function getUserRecord(userId) {
+  return users.find(user => user.id === normalizeUserId(userId)) || null;
+}
+
+function hasUsableNickname() {
+  return Boolean(getActiveUserRecord()?.name);
+}
+
+function ensureAuthenticatedForApp() {
+  if (!currentAuthUser) {
+    showUserAlert("Sign in first.");
+    return false;
+  }
+
+  if (!hasUsableNickname()) {
+    showUserAlert("Choose a nickname before using the app.");
+    return false;
+  }
+
+  return true;
+}
+
+function isAdminUser() {
+  return normalize(getActiveUserName()) === "steph";
+}
+
+function updateAdminUiState() {
+  const showAdminTools = isAdminUser();
+  elements.adminEventTools?.classList.toggle("d-none", !showAdminTools);
+  elements.adminLocationTools?.classList.toggle("d-none", !showAdminTools);
+  elements.adminOpponentTools?.classList.toggle("d-none", !showAdminTools);
+
+  if (!showAdminTools) {
+    return;
+  }
+
+  populateRemoveEventSelect();
+  populateRemoveLocationSelect();
+  populateRemoveOpponentSelect();
+}
+
+function populateRemoveUserSelect() {
+  if (!elements.removeUserSelect) {
+    return;
+  }
+
+  elements.removeUserSelect.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select player...";
+  elements.removeUserSelect.appendChild(placeholder);
+
+  users
+    .filter(user => normalize(user.name) !== "steph")
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .forEach(user => {
+      const option = document.createElement("option");
+      option.value = String(user.id);
+      option.textContent = user.name;
+      elements.removeUserSelect.appendChild(option);
+    });
+
+  elements.removeUserSelect.value = "";
+}
+
+function populateRemoveLocationSelect() {
+  if (!elements.removeLocationSelect) {
+    return;
+  }
+
+  elements.removeLocationSelect.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select location...";
+  elements.removeLocationSelect.appendChild(placeholder);
+
+  [...customLocations]
+    .sort((left, right) => left.localeCompare(right))
+    .forEach(location => {
+      const option = document.createElement("option");
+      option.value = location;
+      option.textContent = location;
+      elements.removeLocationSelect.appendChild(option);
+    });
+
+  elements.removeLocationSelect.value = "";
+}
+
+function populateRemoveEventSelect(selectedValue = "") {
+  if (!elements.removeEventSelect) {
+    return;
+  }
+
+  const selectedDate = currentDate || elements.dateInput?.value || "";
+  const dayEvents = selectedDate ? getEventsOnDate(selectedDate) : [];
+
+  elements.removeEventSelect.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select event...";
+  elements.removeEventSelect.appendChild(placeholder);
+
+  dayEvents.forEach(event => {
+    const option = document.createElement("option");
+    option.value = String(event.id);
+    option.textContent = getEventAdminLabel(event);
+    elements.removeEventSelect.appendChild(option);
+  });
+
+  const optionValues = [...elements.removeEventSelect.options].map(option => option.value);
+  elements.removeEventSelect.value = optionValues.includes(String(selectedValue)) ? String(selectedValue) : "";
+  elements.removeEventSelect.disabled = dayEvents.length === 0;
+  if (elements.removeEventButton) {
+    elements.removeEventButton.disabled = dayEvents.length === 0;
+  }
+}
+
+function populateRemoveOpponentSelect() {
+  if (!elements.removeOpponentSelect) {
+    return;
+  }
+
+  elements.removeOpponentSelect.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select opponent...";
+  elements.removeOpponentSelect.appendChild(placeholder);
+
+  [...customOpponents]
+    .sort((left, right) => left.localeCompare(right))
+    .forEach(name => {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      elements.removeOpponentSelect.appendChild(option);
+    });
+
+  elements.removeOpponentSelect.value = "";
+}
+
+function mergePersistedEvents(persistedEvents) {
+  persistedEvents.forEach(event => {
+    const existingIndex = events.findIndex(entry => entry.id === event.id);
+    if (existingIndex !== -1) {
+      events[existingIndex] = {
+        ...events[existingIndex],
+        ...event
+      };
+      return;
+    }
+
+    events.push(event);
+  });
+}
+
+function logPersistenceFailure(context, error) {
+  if (!isFirebasePersistenceEnabled()) {
+    return;
+  }
+
+  console.error(`Failed to persist ${context}.`, error);
+}
+
+function persistDeletedLegacyUser(userId) {
+  void deleteLegacyCustomUser(userId).catch(error => logPersistenceFailure("legacy user cleanup", error));
+}
+
+function persistCustomLocationRecord(locationName) {
+  void saveCustomLocation(locationName).catch(error => logPersistenceFailure("custom location", error));
+}
+
+function persistDeletedCustomLocation(locationName) {
+  void deleteCustomLocation(locationName).catch(error => logPersistenceFailure("custom location cleanup", error));
+}
+
+function persistCustomOpponentRecord(opponentName) {
+  void saveCustomOpponent(opponentName).catch(error => logPersistenceFailure("custom opponent", error));
+}
+
+function deleteCustomOpponentRecord(opponentName) {
+  void deleteCustomOpponent(opponentName).catch(error => logPersistenceFailure("custom opponent cleanup", error));
+}
+
+function persistEventRecord(event) {
+  void saveEvent(event).catch(error => logPersistenceFailure("event", error));
+}
+
+function persistDeletedEventRecord(event) {
+  void deleteEvent(event).catch(error => logPersistenceFailure("event cleanup", error));
+}
+
+function persistEventProfileRecord(profile) {
+  void saveEventProfile(profile).catch(error => logPersistenceFailure("event profile", error));
+}
+
+function persistDeletedEventProfile(profile) {
+  void deleteEventProfile(profile).catch(error => logPersistenceFailure("event profile cleanup", error));
+}
+
+function persistMatchEntryRecord(matchEntry) {
+  void saveMatchEntry(matchEntry).catch(error => logPersistenceFailure("match entry", error));
+}
+
+function persistDeletedMatchEntry(matchEntry) {
+  void deleteMatchEntry(matchEntry).catch(error => logPersistenceFailure("match entry cleanup", error));
 }
 
 function initializeEnhancedSelects() {
@@ -481,12 +948,932 @@ function renderSingleManaSymbol(colorCode) {
   }
 
   const fallback = manaSymbolFallbacks[colorCode] || { label: colorCode, className: "generic" };
-  return `<span class="mana-pip ${fallback.className}" title="${escapeHtml(fallback.label)}">${escapeHtml(fallback.label)}</span>`;
+  return `<span class="mana-pip ${fallback.className}" title="${escapeHtml(fallback.label)}">${escapeHtml(colorCode)}</span>`;
+}
+
+function setAuthControlsDisabled(isDisabled) {
+  [
+    elements.googleSignInButton,
+    elements.emailInput,
+    elements.passwordInput,
+    elements.forgotPasswordButton,
+    elements.registerNicknameInput,
+    elements.emailSignInButton,
+    elements.emailRegisterButton,
+    elements.accountMenuButton,
+    elements.nicknameInput,
+    elements.saveNicknameButton,
+    elements.currentPasswordInput,
+    elements.newPasswordInput,
+    elements.confirmPasswordInput,
+    elements.changePasswordButton,
+    elements.signOutButton
+  ].forEach(control => {
+    if (control) {
+      control.disabled = isDisabled;
+    }
+  });
+}
+
+function syncModalBodyState() {
+  document.body.classList.toggle(
+    "account-modal-open",
+    isAuthModalOpen || isAccountModalOpen || isRoundPrefillModalOpen
+  );
+}
+
+function hasPasswordProvider(user = currentAuthUser) {
+  return Boolean(user?.providerData?.some(profile => profile.providerId === "password"));
+}
+
+function getLegacyAccentColor(value) {
+  const normalizedValue = String(value || "").trim();
+  const legacyAccentMap = {
+    ember: "#ff7a18",
+    tide: "#38bdf8",
+    verdant: "#22c55e",
+    crimson: "#ef4444",
+    amethyst: "#8b5cf6",
+    sunlit: "#facc15",
+    slate: "#64748b",
+    midnight: "#111827"
+  };
+  return legacyAccentMap[normalizedValue] || "";
+}
+
+function sanitizeAccentColor(value) {
+  const normalizedValue = String(value || "").trim();
+  const legacyAccentColor = getLegacyAccentColor(normalizedValue);
+  if (legacyAccentColor) {
+    return legacyAccentColor;
+  }
+
+  const normalizedHex = normalizedValue.startsWith("#") ? normalizedValue : `#${normalizedValue}`;
+  if (/^#[0-9a-fA-F]{6}$/.test(normalizedHex)) {
+    return normalizedHex.toLowerCase();
+  }
+
+  return defaultAccentColor;
+}
+
+function getContrastTextColor(backgroundColor) {
+  const accentColor = sanitizeAccentColor(backgroundColor).slice(1);
+  const red = Number.parseInt(accentColor.slice(0, 2), 16);
+  const green = Number.parseInt(accentColor.slice(2, 4), 16);
+  const blue = Number.parseInt(accentColor.slice(4, 6), 16);
+  const luminance = (red * 299 + green * 587 + blue * 114) / 1000;
+  return luminance >= 160 ? "#111111" : "#ffffff";
+}
+
+function getAvatarRingColor(backgroundColor) {
+  const accentColor = sanitizeAccentColor(backgroundColor);
+  return `linear-gradient(135deg, ${accentColor}, rgba(255, 255, 255, 0.18))`;
+}
+
+function getUserAppearance(userId) {
+  const userRecord = getUserRecord(userId);
+  return {
+    accentColor: sanitizeAccentColor(userRecord?.accentColor || userRecord?.accentTheme)
+  };
+}
+
+function getAvatarAppearance(accentColor = defaultAccentColor) {
+  const normalizedAccentColor = sanitizeAccentColor(accentColor);
+  return {
+    fill: normalizedAccentColor,
+    text: getContrastTextColor(normalizedAccentColor),
+    ring: getAvatarRingColor(normalizedAccentColor)
+  };
+}
+
+function getAvatarStyleAttribute(accentColor) {
+  const appearance = getAvatarAppearance(accentColor);
+  return `--player-avatar-fill:${appearance.fill}; --player-avatar-text:${appearance.text}; --player-avatar-ring:${appearance.ring};`;
+}
+
+function renderTrackedPlayerAvatar(name, userId, sizeClass) {
+  const appearance = getUserAppearance(userId);
+  return `
+    <span class="player-avatar-shell ${sizeClass}" style="${getAvatarStyleAttribute(appearance.accentColor)}" aria-hidden="true">
+      <span class="player-avatar-core">${escapeHtml(getParticipantMonogram(name))}</span>
+    </span>
+  `;
+}
+
+function renderBasicPlayerAvatar(name, sizeClass) {
+  return `
+    <span class="player-avatar-shell ${sizeClass}" aria-hidden="true">
+      <span class="player-avatar-core">${escapeHtml(getParticipantMonogram(name))}</span>
+    </span>
+  `;
+}
+
+function openAuthModal(mode = "register") {
+  if (currentAuthUser) {
+    return;
+  }
+
+  authModalMode = mode === "login" ? "login" : "register";
+  isAuthModalOpen = true;
+  elements.authModalShell?.classList.remove("d-none");
+  elements.authModalShell?.setAttribute("aria-hidden", "false");
+  hideUserAlert();
+  renderAuthUi();
+  syncModalBodyState();
+
+  const preferredFocusTarget = authModalMode === "register"
+    ? elements.registerNicknameInput
+    : elements.emailInput;
+  window.setTimeout(() => preferredFocusTarget?.focus(), 0);
+}
+
+function closeAuthModal() {
+  if (!isAuthModalOpen) {
+    return;
+  }
+
+  isAuthModalOpen = false;
+  elements.authModalShell?.classList.add("d-none");
+  elements.authModalShell?.setAttribute("aria-hidden", "true");
+  hideUserAlert();
+  renderAuthUi();
+  syncModalBodyState();
+}
+
+function openAccountModal() {
+  if (!currentAuthUser) {
+    return;
+  }
+
+  hydratePendingProfileCustomizationFromActiveUser();
+  isAccountModalOpen = true;
+  elements.accountModalShell?.classList.remove("d-none");
+  elements.accountModalShell?.setAttribute("aria-hidden", "false");
+  syncModalBodyState();
+  hideAccountModalAlert();
+  renderAuthUi();
+
+  const preferredFocusTarget = needsNicknameSetup
+    ? elements.nicknameInput
+    : hasPasswordProvider()
+      ? elements.currentPasswordInput
+      : elements.nicknameInput;
+
+  window.setTimeout(() => preferredFocusTarget?.focus(), 0);
+}
+
+function closeAccountModal() {
+  if (!isAccountModalOpen) {
+    return;
+  }
+
+  isAccountModalOpen = false;
+  elements.accountModalShell?.classList.add("d-none");
+  elements.accountModalShell?.setAttribute("aria-hidden", "true");
+  hideAccountModalAlert();
+  renderAuthUi();
+  syncModalBodyState();
+}
+
+function openRoundPrefillModal(sourceEntry) {
+  if (!sourceEntry || !elements.roundPrefillModalShell) {
+    return;
+  }
+
+  const opponentName = getUserName(sourceEntry.userId);
+  if (elements.roundPrefillMessage) {
+    elements.roundPrefillMessage.textContent = `This round (Round ${sourceEntry.round}) was already entered by your opponent ${opponentName}.`;
+  }
+
+  isRoundPrefillModalOpen = true;
+  elements.roundPrefillModalShell.classList.remove("d-none");
+  elements.roundPrefillModalShell.setAttribute("aria-hidden", "false");
+  syncModalBodyState();
+}
+
+function closeRoundPrefillModal() {
+  if (!isRoundPrefillModalOpen || !elements.roundPrefillModalShell) {
+    return;
+  }
+
+  isRoundPrefillModalOpen = false;
+  elements.roundPrefillModalShell.classList.add("d-none");
+  elements.roundPrefillModalShell.setAttribute("aria-hidden", "true");
+  syncModalBodyState();
+}
+
+function showAccountModalAlert(message) {
+  if (!elements.accountModalAlert) {
+    return;
+  }
+
+  elements.accountModalAlert.textContent = message;
+  elements.accountModalAlert.classList.remove("d-none");
+}
+
+function hideAccountModalAlert() {
+  if (!elements.accountModalAlert) {
+    return;
+  }
+
+  elements.accountModalAlert.textContent = "";
+  elements.accountModalAlert.classList.add("d-none");
+}
+
+function renderAuthUi() {
+  const isSignedIn = Boolean(currentAuthUser);
+  const canUseApp = Boolean(isSignedIn && hasUsableNickname());
+  const displayName = hasUsableNickname() ? getActiveUserName() : "Nickname needed";
+  const passwordEnabled = hasPasswordProvider();
+
+  elements.authSignedOut?.classList.toggle("d-none", isSignedIn);
+  elements.authPrimaryRow?.classList.toggle("d-none", isSignedIn);
+  elements.authGoogleLaunch?.classList.toggle("d-none", isSignedIn);
+  elements.statsShortcutsBlock?.classList.toggle("d-none", !isSignedIn);
+  elements.trackButton?.classList.toggle("d-none", !isSignedIn);
+  elements.welcomeMessage?.classList.toggle("d-none", !isSignedIn);
+  elements.accountMenuButton?.classList.toggle("d-none", !isSignedIn);
+  elements.accountMenuButton?.setAttribute("aria-label", isSignedIn ? `Open account menu for ${displayName}` : "Open account menu");
+
+  if (elements.welcomeMessage) {
+    if (isSignedIn) {
+      const appearance = getUserAppearance(activeUserId);
+      const emailMarkup = currentAuthUser?.email
+        ? `<div class="welcome-subtitle">${escapeHtml(currentAuthUser.email)}</div>`
+        : "";
+
+      elements.welcomeMessage.innerHTML = `
+        <div class="welcome-avatar-wrap">
+          <span class="player-avatar-shell welcome-avatar" style="${getAvatarStyleAttribute(appearance.accentColor)}" aria-hidden="true">
+            <span class="player-avatar-core">${escapeHtml(getParticipantMonogram(displayName))}</span>
+          </span>
+        </div>
+        <div class="welcome-copy">
+          <div class="welcome-kicker">Welcome back</div>
+          <div class="welcome-heading-row">
+            <div class="welcome-name">${escapeHtml(displayName)}</div>
+          </div>
+          ${emailMarkup}
+        </div>
+      `;
+    } else {
+      elements.welcomeMessage.innerHTML = "";
+    }
+  }
+
+  if (elements.accountModalHint) {
+    elements.accountModalHint.textContent = isSignedIn
+      ? needsNicknameSetup
+        ? "Pick the nickname the rest of the app should use for you."
+        : "Manage your nickname, accent color, and sign-in settings."
+      : "Sign in with Google or email, then choose the nickname you want to be known by.";
+  }
+
+  if (elements.authModalTitle) {
+    elements.authModalTitle.textContent = authModalMode === "login" ? "Log in" : "Register";
+  }
+
+  if (elements.authModalHint) {
+    elements.authModalHint.textContent = authModalMode === "login"
+      ? "Use your email and password to get back into your tracking."
+      : "Create your account with email and choose the nickname players should know you by.";
+  }
+
+  elements.authNicknameRow?.classList.toggle("d-none", authModalMode === "login");
+  elements.forgotPasswordRow?.classList.toggle("d-none", authModalMode !== "login");
+
+  if (elements.accountEmailPill) {
+    elements.accountEmailPill.textContent = currentAuthUser?.email || "No email";
+  }
+
+  updateAccountMenuAvatar();
+
+  if (elements.nicknameInput) {
+    const currentValue = elements.nicknameInput.value.trim();
+    const desiredValue = hasUsableNickname() ? getActiveUserName() : elements.registerNicknameInput?.value.trim() || "";
+    if (!currentValue || currentValue === desiredValue || needsNicknameSetup) {
+      elements.nicknameInput.value = desiredValue;
+    }
+  }
+
+  renderProfileCustomizationControls();
+
+  elements.passwordSection?.classList.toggle("d-none", !passwordEnabled);
+  elements.passwordUnavailableNote?.classList.toggle("d-none", passwordEnabled);
+
+  [
+    elements.trackButton,
+    elements.globalStatsButton,
+    elements.friendsStatsButton,
+    elements.personalStatsButton
+  ].forEach(button => {
+    if (button) {
+      button.disabled = !canUseApp || authBusy || !authResolved;
+    }
+  });
+
+  setAuthControlsDisabled(authBusy);
+}
+
+function hydratePendingProfileCustomizationFromActiveUser() {
+  const appearance = getUserAppearance(activeUserId);
+  pendingAccentColor = appearance.accentColor;
+}
+
+function renderProfileCustomizationControls() {
+  if (!elements.profileColorInput) {
+    return;
+  }
+
+  elements.profileColorInput.value = sanitizeAccentColor(pendingAccentColor);
+  if (elements.profileColorValue) {
+    elements.profileColorValue.textContent = sanitizeAccentColor(pendingAccentColor).toUpperCase();
+  }
+
+  updateProfileStylePreview();
+}
+
+function updateProfileStylePreview() {
+  const previewName = elements.nicknameInput?.value.trim() || getActiveUserName();
+  const appearance = getAvatarAppearance(pendingAccentColor);
+
+  if (elements.accountStylePreviewAvatar) {
+    elements.accountStylePreviewAvatar.style.setProperty("--player-avatar-fill", appearance.fill);
+    elements.accountStylePreviewAvatar.style.setProperty("--player-avatar-text", appearance.text);
+    elements.accountStylePreviewAvatar.style.setProperty("--player-avatar-ring", appearance.ring);
+  }
+  if (elements.accountStylePreviewCore) {
+    elements.accountStylePreviewCore.textContent = getParticipantMonogram(previewName);
+  }
+  if (elements.accountStylePreviewName) {
+    elements.accountStylePreviewName.textContent = previewName || "Your profile";
+  }
+}
+
+function updateAccountMenuAvatar() {
+  if (!elements.accountMenuAvatar) {
+    return;
+  }
+
+  const appearance = getUserAppearance(activeUserId);
+  const avatarAppearance = getAvatarAppearance(appearance.accentColor);
+  elements.accountMenuAvatar.style.setProperty("--player-avatar-fill", avatarAppearance.fill);
+  elements.accountMenuAvatar.style.setProperty("--player-avatar-text", avatarAppearance.text);
+  elements.accountMenuAvatar.style.setProperty("--player-avatar-ring", avatarAppearance.ring);
+}
+
+function refreshUserBoundUi() {
+  populateLocationSelect(elements.locationSelect?.value || "");
+  populateOpponentSelect(elements.opponentSelect?.value || "npc");
+  updateAdminUiState();
+  renderActivityFeed();
+  renderAuthUi();
+
+  if (screens.match.classList.contains("active") && currentEventId && ensureAuthenticatedSilently()) {
+    renderMatchScreen();
+  } else if (screens.personalStats.classList.contains("active") && ensureAuthenticatedSilently()) {
+    renderPersonalStatsPage();
+  } else if (screens.stats.classList.contains("active")) {
+    renderGlobalStats();
+  } else if (screens.friendsStats.classList.contains("active")) {
+    renderFriendsStats();
+  }
+}
+
+function ensureAuthenticatedSilently() {
+  return Boolean(currentAuthUser && hasUsableNickname());
+}
+
+function createTrackedPersonalStatsSubject(userId) {
+  return {
+    kind: "tracked",
+    userId: normalizeUserId(userId)
+  };
+}
+
+function createNamedOpponentPersonalStatsSubject(name) {
+  return {
+    kind: "named",
+    name: String(name || "").trim()
+  };
+}
+
+function getViewedPersonalStatsSubject() {
+  if (viewedPersonalStatsSubject?.kind === "tracked") {
+    const normalizedViewedUserId = normalizeUserId(viewedPersonalStatsSubject.userId);
+    if (normalizedViewedUserId && users.some(user => user.id === normalizedViewedUserId)) {
+      return createTrackedPersonalStatsSubject(normalizedViewedUserId);
+    }
+  }
+
+  if (viewedPersonalStatsSubject?.kind === "named") {
+    const opponentName = String(viewedPersonalStatsSubject.name || "").trim();
+    if (opponentName) {
+      return createNamedOpponentPersonalStatsSubject(opponentName);
+    }
+  }
+
+  viewedPersonalStatsSubject = createTrackedPersonalStatsSubject(activeUserId);
+  return viewedPersonalStatsSubject;
+}
+
+function getFriendlyAuthError(error) {
+  const code = error?.code || "";
+
+  if (code.includes("invalid-credential") || code.includes("wrong-password") || code.includes("user-not-found")) {
+    return "That login didn't work. Check your email and password.";
+  }
+
+  if (code.includes("email-already-in-use")) {
+    return "That email is already registered. Try signing in instead.";
+  }
+
+  if (code.includes("weak-password")) {
+    return "Choose a stronger password with at least 6 characters.";
+  }
+
+  if (code.includes("invalid-email")) {
+    return "Enter a valid email address first.";
+  }
+
+  if (code.includes("too-many-requests")) {
+    return "Too many attempts right now. Give it a moment and try again.";
+  }
+
+  if (code.includes("popup-closed-by-user")) {
+    return "Google sign-in was closed before it finished.";
+  }
+
+  return error?.message || "Authentication failed.";
+}
+
+function findAuthUserByNickname(nickname, excludeId = "") {
+  return userProfiles.find(user =>
+    user.nickname &&
+    normalize(user.nickname) === normalize(nickname) &&
+    user.id !== normalizeUserId(excludeId)
+  ) || null;
+}
+
+function findLegacyUsersByNickname(nickname) {
+  return legacyUsers.filter(user => normalize(user.name) === normalize(nickname));
+}
+
+function upsertCurrentAuthProfile(profile) {
+  mergePersistedUsers([{
+    id: normalizeUserId(profile.id),
+    nickname: profile.nickname || "",
+    provider: profile.provider || getProviderLabel(currentAuthUser),
+    accentColor: sanitizeAccentColor(profile.accentColor || profile.accentTheme)
+  }]);
+}
+
+async function handleAuthStateChange(user) {
+  currentAuthUser = user;
+  activeUserId = user ? normalizeUserId(user.uid) : null;
+  viewedPersonalStatsSubject = createTrackedPersonalStatsSubject(activeUserId);
+  authResolved = true;
+
+  if (!user) {
+    needsNicknameSetup = false;
+    hideUserAlert();
+    closeAuthModal();
+    closeAccountModal();
+    closeRoundPrefillModal();
+    showScreen("start");
+    refreshUserBoundUi();
+    return;
+  }
+
+  try {
+    const persistedProfile = await loadUserProfile(user.uid);
+    const profile = persistedProfile || {
+      id: normalizeUserId(user.uid),
+      nickname: "",
+      provider: getProviderLabel(user),
+      accentColor: defaultAccentColor
+    };
+
+    upsertCurrentAuthProfile(profile);
+    needsNicknameSetup = !profile.nickname;
+
+    if (profile.nickname) {
+      await migrateLegacyUserDataIfNeeded(user.uid, profile.nickname);
+    }
+  } catch (error) {
+    console.error("Failed to sync auth state.", error);
+    showUserAlert("Signed in, but the player profile could not be loaded yet.");
+  }
+
+  closeAuthModal();
+  refreshUserBoundUi();
+  if (needsNicknameSetup) {
+    openAccountModal();
+  }
+}
+
+async function handleGoogleSignIn() {
+  authBusy = true;
+  renderAuthUi();
+  hideUserAlert();
+
+  try {
+    await signInWithGoogle();
+  } catch (error) {
+    showUserAlert(getFriendlyAuthError(error));
+  } finally {
+    authBusy = false;
+    renderAuthUi();
+  }
+}
+
+async function handleEmailSignIn() {
+  const email = elements.emailInput?.value.trim() || "";
+  const password = elements.passwordInput?.value || "";
+
+  if (!email || !password) {
+    showUserAlert("Enter your email and password to sign in.");
+    return;
+  }
+
+  authBusy = true;
+  renderAuthUi();
+  hideUserAlert();
+
+  try {
+    await signInWithEmail(email, password);
+    if (elements.passwordInput) {
+      elements.passwordInput.value = "";
+    }
+  } catch (error) {
+    showUserAlert(getFriendlyAuthError(error));
+  } finally {
+    authBusy = false;
+    renderAuthUi();
+  }
+}
+
+async function handleEmailRegister() {
+  const nickname = elements.registerNicknameInput?.value.trim() || "";
+  const email = elements.emailInput?.value.trim() || "";
+  const password = elements.passwordInput?.value || "";
+
+  if (!nickname) {
+    showUserAlert("Choose a nickname before creating an account.");
+    return;
+  }
+
+  if (findAuthUserByNickname(nickname)) {
+    showUserAlert("That nickname is already taken.");
+    return;
+  }
+
+  if (!email || !password) {
+    showUserAlert("Enter an email and password to create an account.");
+    return;
+  }
+
+  authBusy = true;
+  renderAuthUi();
+  hideUserAlert();
+
+  try {
+    const credential = await signUpWithEmail(email, password, nickname);
+    await saveProfileForCurrentUser({
+      nickname,
+      accentColor: defaultAccentColor
+    }, credential.user, { successMessage: "" });
+    if (elements.passwordInput) {
+      elements.passwordInput.value = "";
+    }
+  } catch (error) {
+    showUserAlert(getFriendlyAuthError(error));
+  } finally {
+    authBusy = false;
+    renderAuthUi();
+  }
+}
+
+async function handleForgotPasswordReset() {
+  const email = elements.emailInput?.value.trim() || "";
+  if (!email) {
+    showUserAlert("Enter your email first, then use forgot password.");
+    return;
+  }
+
+  authBusy = true;
+  renderAuthUi();
+  hideUserAlert();
+
+  try {
+    await requestPasswordReset(email);
+    showUserAlert("Password reset email sent. Check your inbox.");
+  } catch (error) {
+    showUserAlert(getFriendlyAuthError(error));
+  } finally {
+    authBusy = false;
+    renderAuthUi();
+  }
+}
+
+async function handleSaveNickname() {
+  const nickname = elements.nicknameInput?.value.trim() || "";
+  await saveProfileForCurrentUser({
+    nickname,
+    accentColor: pendingAccentColor
+  }, currentAuthUser, { successMessage: "Profile updated." });
+}
+
+async function saveProfileForCurrentUser(profileDraft, authUser = currentAuthUser, options = {}) {
+  const { successMessage = "Profile updated." } = options;
+  if (!authUser) {
+    showAccountModalAlert("Sign in before choosing a nickname.");
+    return;
+  }
+
+  const nickname = profileDraft?.nickname?.trim() || "";
+  if (!nickname) {
+    showAccountModalAlert("Enter the nickname you want to use.");
+    return;
+  }
+
+  const conflictingAuthUser = findAuthUserByNickname(nickname, authUser.uid);
+  if (conflictingAuthUser) {
+    showAccountModalAlert("That nickname is already taken.");
+    return;
+  }
+
+  authBusy = true;
+  renderAuthUi();
+  hideAccountModalAlert();
+
+  try {
+    const existingAppearance = getUserAppearance(authUser.uid);
+    const userProfile = {
+      id: normalizeUserId(authUser.uid),
+      nickname,
+      provider: getProviderLabel(authUser),
+      accentColor: sanitizeAccentColor(profileDraft?.accentColor || existingAppearance.accentColor)
+    };
+
+    await saveUserProfile(userProfile);
+    upsertCurrentAuthProfile(userProfile);
+    await updateAuthNickname(authUser, nickname);
+    await migrateLegacyUserDataIfNeeded(authUser.uid, nickname);
+    mergeNamedOpponentIntoTrackedUser({
+      id: normalizeUserId(authUser.uid),
+      name: nickname
+    });
+
+    activeUserId = normalizeUserId(authUser.uid);
+    needsNicknameSetup = false;
+    pendingAccentColor = userProfile.accentColor;
+    if (elements.registerNicknameInput) {
+      elements.registerNicknameInput.value = "";
+    }
+    if (successMessage) {
+      showAccountModalAlert(successMessage);
+    }
+  } catch (error) {
+    console.error("Failed to save profile.", error);
+    showAccountModalAlert("Could not save that profile yet.");
+  } finally {
+    authBusy = false;
+    refreshUserBoundUi();
+  }
+}
+
+function handleAccentColorInput(event) {
+  pendingAccentColor = sanitizeAccentColor(event.target?.value);
+  renderProfileCustomizationControls();
+}
+
+async function handleChangePassword() {
+  if (!currentAuthUser) {
+    showAccountModalAlert("Sign in before changing your password.");
+    return;
+  }
+
+  if (!hasPasswordProvider()) {
+    showAccountModalAlert("This account does not use password sign-in.");
+    return;
+  }
+
+  const currentPassword = elements.currentPasswordInput?.value || "";
+  const newPassword = elements.newPasswordInput?.value || "";
+  const confirmPassword = elements.confirmPasswordInput?.value || "";
+
+  if (!currentPassword || !newPassword || !confirmPassword) {
+    showAccountModalAlert("Fill in your current password and the new password twice.");
+    return;
+  }
+
+  if (newPassword.length < 6) {
+    showAccountModalAlert("Choose a new password with at least 6 characters.");
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    showAccountModalAlert("The new passwords do not match.");
+    return;
+  }
+
+  authBusy = true;
+  renderAuthUi();
+  hideAccountModalAlert();
+
+  try {
+    await changeCurrentUserPassword(currentPassword, newPassword);
+    [
+      elements.currentPasswordInput,
+      elements.newPasswordInput,
+      elements.confirmPasswordInput
+    ].forEach(input => {
+      if (input) {
+        input.value = "";
+      }
+    });
+    showAccountModalAlert("Password updated.");
+  } catch (error) {
+    console.error("Failed to change password.", error);
+    showAccountModalAlert(getFriendlyAuthError(error));
+  } finally {
+    authBusy = false;
+    renderAuthUi();
+  }
+}
+
+async function handleSignOut() {
+  authBusy = true;
+  renderAuthUi();
+  hideAccountModalAlert();
+
+  try {
+    await signOutCurrentUser();
+    closeAccountModal();
+    showScreen("start");
+  } catch (error) {
+    showAccountModalAlert(getFriendlyAuthError(error));
+  } finally {
+    authBusy = false;
+    renderAuthUi();
+  }
+}
+
+function handleAuthPasswordKeydown(event) {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    if (authModalMode === "register") {
+      handleEmailRegister();
+      return;
+    }
+    handleEmailSignIn();
+  }
+}
+
+function handleRegisterNicknameKeydown(event) {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    handleEmailRegister();
+  }
+}
+
+function handleNicknameSaveKeydown(event) {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    handleSaveNickname();
+  }
+}
+
+function handlePasswordChangeKeydown(event) {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    handleChangePassword();
+  }
+}
+
+function handleGlobalKeydown(event) {
+  if (event.key !== "Escape") {
+    return;
+  }
+
+  if (isAuthModalOpen) {
+    closeAuthModal();
+    return;
+  }
+
+  if (isRoundPrefillModalOpen) {
+    closeRoundPrefillModal();
+    return;
+  }
+
+  if (isAccountModalOpen) {
+    closeAccountModal();
+  }
+}
+
+function mergeProfileValues(primaryValue, fallbackValue, defaultValue = "") {
+  return primaryValue || fallbackValue || defaultValue;
+}
+
+function mergeProfileRecords(targetProfile, sourceProfile) {
+  return {
+    ...targetProfile,
+    pod: mergeProfileValues(targetProfile.pod, sourceProfile.pod, "Pod 1"),
+    deckColors: mergeProfileValues(targetProfile.deckColors, sourceProfile.deckColors),
+    archetype: mergeProfileValues(targetProfile.archetype, sourceProfile.archetype)
+  };
+}
+
+function mergeMatchRecords(targetEntry, sourceEntry) {
+  return {
+    ...sourceEntry,
+    ...targetEntry,
+    notes: mergeProfileValues(targetEntry.notes, sourceEntry.notes),
+    score: mergeProfileValues(targetEntry.score, sourceEntry.score, "2-0"),
+    result: mergeProfileValues(targetEntry.result, sourceEntry.result, "win")
+  };
+}
+
+async function migrateLegacyUserDataIfNeeded(targetUserId, nickname) {
+  const normalizedTargetId = normalizeUserId(targetUserId);
+  const matchingLegacyUsers = findLegacyUsersByNickname(nickname).filter(user => user.id !== normalizedTargetId);
+
+  if (!matchingLegacyUsers.length) {
+    return;
+  }
+
+  matchingLegacyUsers.forEach(legacyUser => {
+    for (let index = eventProfiles.length - 1; index >= 0; index -= 1) {
+      const legacyProfile = eventProfiles[index];
+      if (legacyProfile.userId !== legacyUser.id) {
+        continue;
+      }
+
+      const existingIndex = eventProfiles.findIndex(profile =>
+        profile.eventId === legacyProfile.eventId &&
+        profile.userId === normalizedTargetId
+      );
+
+      if (existingIndex !== -1) {
+        eventProfiles[existingIndex] = mergeProfileRecords(eventProfiles[existingIndex], legacyProfile);
+        persistEventProfileRecord(eventProfiles[existingIndex]);
+        eventProfiles.splice(index, 1);
+        persistDeletedEventProfile(legacyProfile);
+      } else {
+        const migratedProfile = {
+          ...legacyProfile,
+          userId: normalizedTargetId
+        };
+        eventProfiles[index] = migratedProfile;
+        persistDeletedEventProfile(legacyProfile);
+        persistEventProfileRecord(migratedProfile);
+      }
+    }
+
+    for (let index = matchEntries.length - 1; index >= 0; index -= 1) {
+      const entry = matchEntries[index];
+      const migratedEntry = {
+        ...entry,
+        userId: entry.userId === legacyUser.id ? normalizedTargetId : entry.userId,
+        opponentUserId: entry.opponentUserId === legacyUser.id ? normalizedTargetId : entry.opponentUserId
+      };
+
+      if (migratedEntry.userId === entry.userId && migratedEntry.opponentUserId === entry.opponentUserId) {
+        continue;
+      }
+
+      const duplicateIndex = matchEntries.findIndex(other =>
+        other.id !== entry.id &&
+        other.eventId === migratedEntry.eventId &&
+        other.round === migratedEntry.round &&
+        other.userId === migratedEntry.userId
+      );
+
+      if (duplicateIndex !== -1) {
+        matchEntries[duplicateIndex] = mergeMatchRecords(matchEntries[duplicateIndex], migratedEntry);
+        persistMatchEntryRecord(matchEntries[duplicateIndex]);
+        matchEntries.splice(index, 1);
+        persistDeletedMatchEntry(entry);
+      } else {
+        matchEntries[index] = migratedEntry;
+        persistMatchEntryRecord(migratedEntry);
+      }
+    }
+
+    const legacyIndex = legacyUsers.findIndex(user => user.id === legacyUser.id);
+    if (legacyIndex !== -1) {
+      legacyUsers.splice(legacyIndex, 1);
+    }
+
+    persistDeletedLegacyUser(legacyUser.id);
+  });
+
+  rebuildUsers();
 }
 
 function handleTrackStart() {
-  if (!activeUserId) {
-    showUserAlert("Select a user first.");
+  if (!ensureAuthenticatedForApp()) {
     return;
   }
 
@@ -497,44 +1884,45 @@ function handleTrackStart() {
   showScreen("date");
 }
 
-function handleActiveUserChange() {
-  activeUserId = Number(elements.activeUserSelect.value) || null;
-  elements.userAlert.classList.add("d-none");
+function mergeNamedOpponentIntoTrackedUser(createdUser) {
+  const normalizedName = normalize(createdUser.name);
+  const duplicateOpponents = customOpponents.filter(name => normalize(name) === normalizedName);
 
-  if (screens.match.classList.contains("active")) {
-    populateOpponentSelect(elements.opponentSelect.value);
-    renderCurrentEventBanner();
-  }
-}
-
-function handleCreateUser() {
-  const trimmedName = elements.newUserInput.value.trim();
-  if (!trimmedName) {
-    showUserAlert("Enter a user name before creating one.");
+  if (!duplicateOpponents.length) {
     return;
   }
 
-  const exists = users.some(user => normalize(user.name) === normalize(trimmedName));
-  if (exists) {
-    showUserAlert("That user already exists. Select them from the dropdown.");
-    return;
+  for (let index = customOpponents.length - 1; index >= 0; index -= 1) {
+    if (normalize(customOpponents[index]) === normalizedName) {
+      customOpponents.splice(index, 1);
+    }
   }
 
-  users.push({ id: nextUserId++, name: trimmedName });
-  users.sort((left, right) => left.name.localeCompare(right.name));
-  activeUserId = users.find(user => user.name === trimmedName)?.id ?? activeUserId;
-  populateUserSelect();
-  populateLocationSelect(elements.locationSelect.value);
-  populateOpponentSelect(elements.opponentSelect?.value || "");
-  elements.newUserInput.value = "";
-  elements.userAlert.classList.add("d-none");
-}
+  const updatedMatches = [];
+  matchEntries.forEach(entry => {
+    if (entry.opponentKind !== "named" || !entry.opponentName) {
+      return;
+    }
 
-function handleEnterToCreateUser(event) {
-  if (event.key === "Enter") {
-    event.preventDefault();
-    handleCreateUser();
+    if (normalize(entry.opponentName) !== normalizedName) {
+      return;
+    }
+
+    entry.opponentKind = "tracked";
+    entry.opponentUserId = createdUser.id;
+    entry.opponentName = createdUser.name;
+    updatedMatches.push(entry);
+  });
+
+  const selectedOpponentValue = elements.opponentSelect?.value || "";
+  const shouldSelectTrackedUser = duplicateOpponents.some(name => selectedOpponentValue === `named:${name}`);
+
+  if (elements.opponentSelect) {
+    populateOpponentSelect(shouldSelectTrackedUser ? `user:${createdUser.id}` : selectedOpponentValue);
   }
+
+  duplicateOpponents.forEach(name => deleteCustomOpponentRecord(name));
+  updatedMatches.forEach(entry => persistMatchEntryRecord(entry));
 }
 
 function handleCreateLocation() {
@@ -556,6 +1944,57 @@ function handleCreateLocation() {
   populateLocationSelect(trimmedLocation);
   elements.newLocationInput.value = "";
   updatePotentialDuplicateNotice();
+  persistCustomLocationRecord(trimmedLocation);
+}
+
+function handleRemoveLocation() {
+  const selectedLocation = elements.removeLocationSelect?.value || "";
+  if (!selectedLocation) {
+    showDuplicateAlert("Select a location to remove.");
+    return;
+  }
+
+  const confirmation = window.confirm(`Remove location ${selectedLocation} from the quick-pick list?`);
+  if (!confirmation) {
+    return;
+  }
+
+  const locationIndex = customLocations.findIndex(location => normalize(location) === normalize(selectedLocation));
+  if (locationIndex !== -1) {
+    customLocations.splice(locationIndex, 1);
+  }
+
+  populateLocationSelect(elements.locationSelect.value === selectedLocation ? "" : elements.locationSelect.value);
+  updateAdminUiState();
+  updatePotentialDuplicateNotice();
+  persistDeletedCustomLocation(selectedLocation);
+}
+
+function handleRemoveEvent() {
+  const selectedValue = elements.removeEventSelect?.value || "";
+  if (!selectedValue) {
+    window.alert("Select an event to delete.");
+    return;
+  }
+
+  const selectedEventId = Number(selectedValue);
+
+  const event = events.find(entry => entry.id === selectedEventId);
+  if (!event) {
+    window.alert("That event could not be found.");
+    populateRemoveEventSelect();
+    return;
+  }
+
+  const confirmation = window.confirm(
+    `Delete ${getEventAdminLabel(event)}?\n\nThis will remove the event, its participant profiles, and all logged rounds for it.`
+  );
+
+  if (!confirmation) {
+    return;
+  }
+
+  deleteEventById(selectedEventId);
 }
 
 function handleEventFormatChange() {
@@ -570,24 +2009,47 @@ function handleCreateOpponent() {
     return;
   }
 
-  const trackedOpponent = users.find(user => normalize(user.name) === normalize(trimmedOpponent));
-  if (trackedOpponent) {
-    populateOpponentSelect(`user:${trackedOpponent.id}`);
+  const existingOptionValue = findExistingOpponentOptionValueByName(trimmedOpponent);
+  if (existingOptionValue) {
+    populateOpponentSelect(existingOptionValue);
     elements.newOpponentInput.value = "";
     hideMatchAlert();
+    handleOpponentSelectionChange();
     return;
   }
 
-  const existingOpponent = customOpponents.find(name => normalize(name) === normalize(trimmedOpponent));
-  if (!existingOpponent) {
-    customOpponents.push(trimmedOpponent);
-  }
-
-  const selectedName = existingOpponent || trimmedOpponent;
-  populateOpponentSelect(`named:${selectedName}`);
+  customOpponents.push(trimmedOpponent);
+  replaceStringCollection(customOpponents, customOpponents);
+  populateOpponentSelect(`named:${trimmedOpponent}`);
   elements.newOpponentInput.value = "";
   hideMatchAlert();
   handleOpponentSelectionChange();
+  persistCustomOpponentRecord(trimmedOpponent);
+}
+
+function handleRemoveOpponent() {
+  const selectedOpponent = elements.removeOpponentSelect?.value || "";
+  if (!selectedOpponent) {
+    showMatchAlert("Select an opponent to remove.");
+    return;
+  }
+
+  const confirmation = window.confirm(`Remove opponent ${selectedOpponent} from the quick-pick list?`);
+  if (!confirmation) {
+    return;
+  }
+
+  const opponentIndex = customOpponents.findIndex(name => normalize(name) === normalize(selectedOpponent));
+  if (opponentIndex !== -1) {
+    customOpponents.splice(opponentIndex, 1);
+  }
+
+  const currentValue = elements.opponentSelect?.value || "npc";
+  const nextValue = currentValue === `named:${selectedOpponent}` ? "npc" : currentValue;
+  populateOpponentSelect(nextValue);
+  updateAdminUiState();
+  hideMatchAlert();
+  deleteCustomOpponentRecord(selectedOpponent);
 }
 
 function handleEnterToCreateLocation(event) {
@@ -662,11 +2124,11 @@ function handleSaveEvent(event) {
     return;
   }
 
-  const matchingEvents = getMatchingEvents(date, set, location);
-  const nextIndex = getNextIndex(date, set, location);
+  const matchingEvents = getMatchingEvents(date, set, location, format);
+  const nextIndex = getNextIndex(date, set, location, format);
   if (matchingEvents.length) {
     const confirmation = window.confirm(
-      `An event with the same date, set, and location already exists. If you continue, you will create Event ${nextIndex}.`
+      `An event with the same date, set, format, and location already exists. If you continue, you will create Event ${nextIndex}.`
     );
 
     if (!confirmation) {
@@ -691,6 +2153,7 @@ function handleSaveEvent(event) {
   currentMatchBack = "screen-details";
   elements.matchBackButton.dataset.back = currentMatchBack;
   seedPodsForEvent(currentEventId, podCount);
+  persistEventRecord(createdEvent);
   syncDateView(date);
   renderMatchScreen();
   showScreen("match");
@@ -758,18 +2221,32 @@ function attemptAutosaveCurrentRound(options = {}) {
     entry.round === round
   );
 
+  let persistedMatchEntry = null;
+
   if (existingMatchIndex !== -1) {
     matchEntries[existingMatchIndex] = {
       ...matchEntries[existingMatchIndex],
       ...payload
     };
+    persistedMatchEntry = matchEntries[existingMatchIndex];
   } else {
     matchEntries.push({
       id: nextMatchId++,
       ...payload
     });
+    persistedMatchEntry = matchEntries[matchEntries.length - 1];
   }
 
+  if (currentEvent) {
+    persistEventRecord(currentEvent);
+  }
+  if (persistedMatchEntry) {
+    persistMatchEntryRecord(persistedMatchEntry);
+    syncTrackedMatchWithReciprocalEntry(persistedMatchEntry);
+  }
+
+  renderActivityFeed();
+  renderDateEvents(currentEvent?.date || currentDate);
   renderCurrentEventBanner();
   renderMatchRoundNav();
   updateMatchActionButton();
@@ -795,7 +2272,7 @@ function getOpponentPayload(options = {}) {
   }
 
   if (selectedOpponent.startsWith("user:")) {
-    const opponentUserId = Number(selectedOpponent.slice(5));
+    const opponentUserId = normalizeUserId(selectedOpponent.slice(5));
     if (opponentUserId === activeUserId) {
       if (!silent) {
         showMatchAlert("You cannot log yourself as the opponent.");
@@ -832,6 +2309,109 @@ function resetMatchForm(keepOpponentSelection = false) {
   hideMatchAlert();
 }
 
+function getReciprocalTrackedMatchEntry(eventId, userId, round) {
+  const matches = matchEntries
+    .filter(entry =>
+      entry.eventId === eventId &&
+      entry.round === round &&
+      entry.opponentKind === "tracked" &&
+      entry.opponentUserId === userId
+    )
+    .sort((left, right) => getMatchActivityTimestamp(right) - getMatchActivityTimestamp(left));
+
+  return matches[0] || null;
+}
+
+function prefillRoundFromOpponentEntry(sourceEntry) {
+  if (!sourceEntry) {
+    resetMatchForm();
+    return;
+  }
+
+  currentScore = getMirroredScore(sourceEntry.score) || "2-0";
+  matchInteractionState = {
+    opponent: false,
+    score: false
+  };
+  populateOpponentSelect(`user:${sourceEntry.userId}`);
+  elements.newOpponentInput.value = "";
+  elements.matchNotesInput.value = "";
+  updateMatchActionButton();
+  updateScoreUi();
+  hideMatchAlert();
+}
+
+function getRoundPrefillKey(sourceEntry) {
+  if (!sourceEntry) {
+    return "";
+  }
+
+  return `${sourceEntry.eventId}:${sourceEntry.round}:${sourceEntry.userId}:${sourceEntry.opponentUserId || ""}:${sourceEntry.id || ""}`;
+}
+
+function getMirroredMatchResult(result) {
+  if (result === "win") {
+    return "loss";
+  }
+
+  if (result === "loss") {
+    return "win";
+  }
+
+  return "draw";
+}
+
+function getMirroredScore(score) {
+  if (!score || score === "BYE") {
+    return score;
+  }
+
+  const [won, lost] = String(score).split("-");
+  return `${lost || 0}-${won || 0}`;
+}
+
+function syncTrackedMatchWithReciprocalEntry(matchEntry) {
+  if (matchEntry.opponentKind !== "tracked" || !matchEntry.opponentUserId) {
+    return;
+  }
+
+  const reciprocalIndex = matchEntries.findIndex(entry =>
+    entry.eventId === matchEntry.eventId &&
+    entry.round === matchEntry.round &&
+    entry.userId === matchEntry.opponentUserId &&
+    entry.opponentKind === "tracked" &&
+    entry.opponentUserId === matchEntry.userId
+  );
+
+  if (reciprocalIndex === -1) {
+    return;
+  }
+
+  const reciprocalEntry = matchEntries[reciprocalIndex];
+  const mirroredScore = getMirroredScore(matchEntry.score);
+  const mirroredResult = getMirroredMatchResult(matchEntry.result);
+
+  const hasSharedChange =
+    reciprocalEntry.score !== mirroredScore ||
+    reciprocalEntry.result !== mirroredResult ||
+    reciprocalEntry.opponentName !== getUserName(matchEntry.userId);
+
+  if (!hasSharedChange) {
+    return;
+  }
+
+  matchEntries[reciprocalIndex] = {
+    ...reciprocalEntry,
+    opponentKind: "tracked",
+    opponentUserId: matchEntry.userId,
+    opponentName: getUserName(matchEntry.userId),
+    score: mirroredScore,
+    result: mirroredResult
+  };
+
+  persistMatchEntryRecord(matchEntries[reciprocalIndex]);
+}
+
 function populateSetSelect() {
   const selectedValue = elements.setSelect.value;
   elements.setSelect.innerHTML = '<option value="">Choose...</option>';
@@ -860,6 +2440,10 @@ function populateSetSelect() {
 }
 
 function populateUserSelect() {
+  if (!elements.activeUserSelect) {
+    return;
+  }
+
   elements.activeUserSelect.innerHTML = "";
 
   const placeholder = document.createElement("option");
@@ -875,6 +2459,9 @@ function populateUserSelect() {
   });
 
   elements.activeUserSelect.value = activeUserId ? String(activeUserId) : "";
+  if (isAdminUser()) {
+    populateRemoveUserSelect();
+  }
 }
 
 function populateLocationSelect(selectedLocation = "") {
@@ -893,6 +2480,9 @@ function populateLocationSelect(selectedLocation = "") {
   });
 
   elements.locationSelect.value = selectedLocation || "";
+  if (isAdminUser()) {
+    populateRemoveLocationSelect();
+  }
 }
 
 function populatePodSelect(selectedPod = "Pod 1") {
@@ -966,6 +2556,7 @@ function populateOpponentSelect(selectedValue = "") {
     return;
   }
 
+  replaceStringCollection(customOpponents, customOpponents);
   elements.opponentSelect.innerHTML = "";
 
   const unknownOption = document.createElement("option");
@@ -993,6 +2584,24 @@ function populateOpponentSelect(selectedValue = "") {
 
   const optionValues = [...elements.opponentSelect.options].map(option => option.value);
   elements.opponentSelect.value = optionValues.includes(selectedValue) ? selectedValue : "npc";
+  if (isAdminUser()) {
+    populateRemoveOpponentSelect();
+  }
+}
+
+function findExistingOpponentOptionValueByName(name) {
+  const normalizedName = normalize(name);
+  const trackedOpponent = users.find(user => user.id !== activeUserId && normalize(user.name) === normalizedName);
+  if (trackedOpponent) {
+    return `user:${trackedOpponent.id}`;
+  }
+
+  const existingNamedOpponent = dedupeStrings(customOpponents).find(entry => normalize(entry) === normalizedName);
+  if (existingNamedOpponent) {
+    return `named:${existingNamedOpponent}`;
+  }
+
+  return "";
 }
 
 function wireSelectCaret(selectElement) {
@@ -1026,11 +2635,19 @@ function getSelectOpen(selectElement) {
 function showScreen(name) {
   Object.values(screens).forEach(screen => screen.classList.remove("active"));
   screens[name].classList.add("active");
+  if (name !== "match") {
+    closeRoundPrefillModal();
+  }
+  updateAdminUiState();
 }
 
 function showScreenById(id) {
   Object.values(screens).forEach(screen => screen.classList.remove("active"));
   document.getElementById(id).classList.add("active");
+  if (id !== "screen-match") {
+    closeRoundPrefillModal();
+  }
+  updateAdminUiState();
 }
 
 function syncDateView(date) {
@@ -1102,27 +2719,47 @@ function renderDateEvents(date) {
   elements.dateEventList.innerHTML = "";
   elements.dateEventCount.textContent = `${dayEvents.length} event${dayEvents.length === 1 ? "" : "s"}`;
   elements.dateEventEmpty.classList.toggle("d-none", dayEvents.length > 0);
+  populateRemoveEventSelect();
 
   dayEvents.forEach(event => {
     const set = getSet(event.set);
+    const participantsMarkup = renderEventParticipantsSummary(event.id);
     const wrapper = document.createElement("article");
     wrapper.className = "event-option";
 
-    const button = document.createElement("button");
-    button.type = "button";
-    button.style.setProperty("--event-format-accent", getFormatColor(event.format));
-    button.innerHTML = `
+    const card = document.createElement("div");
+    card.className = "event-option-body";
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.setAttribute("aria-label", `Open ${getEventAdminLabel(event)}`);
+    card.style.setProperty("--event-format-accent", getFormatColor(event.format));
+    card.innerHTML = `
         <div class="list-title-row">
           <div>
               <div class="fw-bold">${formatCompactEventLabel(event)}</div>
-              <div class="small text-secondary mt-1">${set ? set.name : event.set} · ${event.format || "Draft"} · ${event.rounds || 3} rounds</div>
+              <div class="small text-secondary mt-1">${set ? set.name : event.set} - ${event.format || "Draft"} - ${event.rounds || 3} rounds</div>
+              ${participantsMarkup}
           </div>
-          <div class="set-badge" style="background:${getFormatColor(event.format)}">${event.set}</div>
+          <div class="set-badge" style="background:${getFormatColor(event.format)}">
+            ${set?.iconSvgUri ? renderSetIcon(set) : `<span class="set-badge-code">${escapeHtml(event.set)}</span>`}
+          </div>
         </div>
       `;
 
-    button.addEventListener("click", () => chooseExistingEvent(event.id));
-    wrapper.appendChild(button);
+    card.addEventListener("click", eventObject => {
+      if (eventObject.target.closest("[data-personal-stats-user], [data-personal-stats-opponent]")) {
+        return;
+      }
+      chooseExistingEvent(event.id);
+    });
+    card.addEventListener("keydown", eventObject => {
+      if (eventObject.key !== "Enter" && eventObject.key !== " ") {
+        return;
+      }
+      eventObject.preventDefault();
+      chooseExistingEvent(event.id);
+    });
+    wrapper.appendChild(card);
     elements.dateEventList.appendChild(wrapper);
   });
 }
@@ -1184,12 +2821,17 @@ function renderMatchScreen() {
   }
 
   ensureDefaultPod(event.id);
+  const hadProfile = eventProfiles.some(entry => entry.eventId === event.id && entry.userId === activeUserId);
   const profile = getOrCreateEventProfile(event.id, activeUserId);
+  if (!hadProfile) {
+    persistEventProfileRecord(profile);
+  }
   populatePodSelect(profile.pod);
   populateDeckColorSelect(profile.deckColors);
   populateArchetypeSelect(profile.archetype);
   populateOpponentSelect();
   selectBestNextRound();
+  renderDateEvents(event.date);
   renderCurrentEventBanner();
   renderMatchRoundNav();
   loadMatchForSelectedRound();
@@ -1204,6 +2846,11 @@ function saveCurrentProfile() {
   profile.pod = elements.podSelect.value || "Pod 1";
   profile.deckColors = elements.deckColorSelect.value;
   profile.archetype = elements.archetypeSelect.value;
+  const currentEvent = getCurrentEvent();
+  if (currentEvent) {
+    persistEventRecord(currentEvent);
+  }
+  persistEventProfileRecord(profile);
 }
 
 function renderCurrentEventBanner() {
@@ -1213,7 +2860,7 @@ function renderCurrentEventBanner() {
   }
 
   const set = getSet(event.set);
-  const duplicateSeries = getMatchingEvents(event.date, event.set, event.location).length > 1;
+  const duplicateSeries = getMatchingEvents(event.date, event.set, event.location, event.format).length > 1;
   const podLabels = getPodsForEvent(event.id);
   const loggedRounds = getMatchesForCurrentPlayerEvent().length;
   const format = event.format || "Draft";
@@ -1238,6 +2885,126 @@ function renderCurrentEventBanner() {
       </div>
     </div>
   `;
+}
+
+function getEventParticipants(eventId) {
+  const trackedParticipants = new Map();
+  const mockParticipants = new Map();
+
+  eventProfiles
+    .filter(profile => profile.eventId === eventId && profile.userId)
+    .forEach(profile => {
+      const userId = normalizeUserId(profile.userId);
+      const name = getUserName(userId);
+      if (name !== "Unknown player") {
+        trackedParticipants.set(userId, {
+          kind: "tracked",
+          id: userId,
+          name
+        });
+      }
+    });
+
+  matchEntries
+    .filter(entry => entry.eventId === eventId)
+    .forEach(entry => {
+      const reporterId = normalizeUserId(entry.userId);
+      const reporterName = getUserName(reporterId);
+      if (reporterId && reporterName !== "Unknown player") {
+        trackedParticipants.set(reporterId, {
+          kind: "tracked",
+          id: reporterId,
+          name: reporterName
+        });
+      }
+
+      if (entry.opponentKind === "tracked" && entry.opponentUserId) {
+        const opponentId = normalizeUserId(entry.opponentUserId);
+        const opponentName = getUserName(opponentId);
+        if (opponentName !== "Unknown player") {
+          trackedParticipants.set(opponentId, {
+            kind: "tracked",
+            id: opponentId,
+            name: opponentName
+          });
+        }
+      }
+
+      if (entry.opponentKind === "named" && entry.opponentName) {
+        const opponentName = entry.opponentName.trim();
+        if (opponentName && normalize(opponentName) !== "npc opponent") {
+          mockParticipants.set(normalize(opponentName), {
+            kind: "mock",
+            name: opponentName
+          });
+        }
+      }
+    });
+
+  const trackedNameSet = new Set(
+    [...trackedParticipants.values()].map(participant => normalize(participant.name))
+  );
+
+  const orderedTrackedParticipants = [...trackedParticipants.values()]
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const orderedMockParticipants = [...mockParticipants.values()]
+    .filter(participant => !trackedNameSet.has(normalize(participant.name)))
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  return [...orderedTrackedParticipants, ...orderedMockParticipants];
+}
+
+function renderEventParticipantsSummary(eventId) {
+  const participants = getEventParticipants(eventId);
+  if (!participants.length) {
+    return "";
+  }
+
+  return `
+    <div class="event-participant-block">
+      <div class="event-participant-label">Participants</div>
+      <div class="event-participant-row">
+        ${participants.map(renderEventParticipantChip).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderEventParticipantChip(participant) {
+  const isMock = participant.kind === "mock";
+  const canOpenTrackedStats = participant.kind === "tracked" && participant.id;
+  const canOpenOpponentStats = isMock && participant.name && normalize(participant.name) !== "npc opponent";
+  const tagName = canOpenTrackedStats || canOpenOpponentStats ? "button type=\"button\"" : "span";
+  const dataAttributes = canOpenTrackedStats
+    ? ` data-personal-stats-user="${escapeHtml(participant.id)}" data-personal-stats-back="screen-date"`
+    : canOpenOpponentStats
+      ? ` data-personal-stats-opponent="${escapeHtml(participant.name)}" data-personal-stats-back="screen-date"`
+      : "";
+  return `
+    <${tagName} class="event-participant-chip${isMock ? " is-mock" : ""}${canOpenTrackedStats || canOpenOpponentStats ? " is-clickable" : ""}"${dataAttributes}>
+      ${canOpenTrackedStats
+        ? renderTrackedPlayerAvatar(participant.name, participant.id, "event-participant-avatar")
+        : renderBasicPlayerAvatar(participant.name, "event-participant-avatar")}
+      <span class="event-participant-name">${escapeHtml(participant.name)}</span>
+    </${canOpenTrackedStats || canOpenOpponentStats ? "button" : "span"}>
+  `;
+}
+
+function getParticipantMonogram(name) {
+  const parts = String(name)
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (!parts.length) {
+    return "?";
+  }
+
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+
+  return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase();
 }
 
 function renderMatchRoundNav() {
@@ -1279,22 +3046,37 @@ function renderMatchRoundNav() {
 
 function loadMatchForSelectedRound() {
   const existingMatch = getMatchForCurrentRound();
-  if (!existingMatch) {
-    resetMatchForm();
+  if (existingMatch) {
+    currentScore = existingMatch.score || "2-0";
+    matchInteractionState = {
+      opponent: true,
+      score: true
+    };
+    populateOpponentSelect(getOpponentSelectValue(existingMatch));
+    elements.newOpponentInput.value = "";
+    elements.matchNotesInput.value = existingMatch.notes || "";
+    updateMatchActionButton();
+    updateScoreUi();
+    hideMatchAlert();
+    lastShownRoundPrefillKey = "";
+    closeRoundPrefillModal();
     return;
   }
 
-  currentScore = existingMatch.score || "2-0";
-  matchInteractionState = {
-    opponent: true,
-    score: true
-  };
-  populateOpponentSelect(getOpponentSelectValue(existingMatch));
-  elements.newOpponentInput.value = "";
-  elements.matchNotesInput.value = existingMatch.notes || "";
-  updateMatchActionButton();
-  updateScoreUi();
-  hideMatchAlert();
+  const reciprocalEntry = getReciprocalTrackedMatchEntry(currentEventId, activeUserId, currentSelectedRound);
+  if (reciprocalEntry) {
+    prefillRoundFromOpponentEntry(reciprocalEntry);
+    const prefillKey = getRoundPrefillKey(reciprocalEntry);
+    if (prefillKey !== lastShownRoundPrefillKey) {
+      openRoundPrefillModal(reciprocalEntry);
+      lastShownRoundPrefillKey = prefillKey;
+    }
+    return;
+  }
+
+  lastShownRoundPrefillKey = "";
+  closeRoundPrefillModal();
+  resetMatchForm();
 }
 
 function selectBestNextRound() {
@@ -1378,8 +3160,7 @@ function updateScoreUi() {
 }
 
 function openGlobalStats(backId) {
-  if (!activeUserId) {
-    showUserAlert("Select a user first.");
+  if (!ensureAuthenticatedForApp()) {
     return;
   }
 
@@ -1393,8 +3174,7 @@ function openStats(backId) {
 }
 
 function openFriendsStats(backId) {
-  if (!activeUserId) {
-    showUserAlert("Select a user first.");
+  if (!ensureAuthenticatedForApp()) {
     return;
   }
 
@@ -1404,11 +3184,40 @@ function openFriendsStats(backId) {
 }
 
 function openPersonalStats(backId) {
-  if (!activeUserId) {
-    showUserAlert("Select a user first.");
+  if (!ensureAuthenticatedForApp()) {
     return;
   }
 
+  openPersonalStatsForUser(activeUserId, backId);
+}
+
+function openPersonalStatsForUser(userId, backId = "screen-start") {
+  if (!ensureAuthenticatedForApp()) {
+    return;
+  }
+
+  const normalizedUserId = normalizeUserId(userId);
+  if (!normalizedUserId || !users.some(user => user.id === normalizedUserId)) {
+    return;
+  }
+
+  viewedPersonalStatsSubject = createTrackedPersonalStatsSubject(normalizedUserId);
+  elements.personalStatsBackButton.dataset.back = backId;
+  renderPersonalStatsPage();
+  showScreen("personalStats");
+}
+
+function openPersonalStatsForOpponent(name, backId = "screen-start") {
+  if (!ensureAuthenticatedForApp()) {
+    return;
+  }
+
+  const normalizedName = String(name || "").trim();
+  if (!normalizedName || normalize(normalizedName) === "npc opponent") {
+    return;
+  }
+
+  viewedPersonalStatsSubject = createNamedOpponentPersonalStatsSubject(normalizedName);
   elements.personalStatsBackButton.dataset.back = backId;
   renderPersonalStatsPage();
   showScreen("personalStats");
@@ -1454,16 +3263,87 @@ function renderFriendsStats() {
 }
 
 function renderPersonalStatsPage() {
-  const personalEntries = matchEntries.filter(entry => entry.userId === activeUserId);
-  const canonicalFriendMatches = buildCanonicalFriendMatches();
+  const subject = getViewedPersonalStatsSubject();
 
-  elements.personalStatsSubtitle.textContent = `Personal stats for ${getActiveUserName()}.`;
-  renderDetailedPersonalStats(personalEntries, canonicalFriendMatches, elements.statsPersonal);
-  renderHeadToHeadStats(canonicalFriendMatches, elements.personalHeadToHead);
-  renderPersonalHistoryToTarget(personalEntries, elements.statsHistory);
+  if (subject.kind === "named") {
+    renderNamedOpponentStatsPage(subject.name);
+    return;
+  }
+
+  const userId = subject.userId;
+  const personalEntries = matchEntries.filter(entry => entry.userId === userId);
+  const canonicalFriendMatches = buildCanonicalFriendMatches();
+  const isOwnStats = userId === activeUserId;
+  const playerName = getUserName(userId);
+
+  if (elements.personalStatsEyebrow) {
+    elements.personalStatsEyebrow.textContent = isOwnStats ? "Personal" : "Player";
+  }
+  if (elements.personalStatsTitle) {
+    elements.personalStatsTitle.textContent = isOwnStats ? "Your stats" : playerName;
+  }
+  if (elements.personalStatsSubtitle) {
+    elements.personalStatsSubtitle.textContent = "Limited stats and match history.";
+  }
+  if (elements.personalStatsSnapshotHeading) {
+    elements.personalStatsSnapshotHeading.textContent = "Snapshot";
+  }
+  if (elements.personalStatsHeadToHeadHeading) {
+    elements.personalStatsHeadToHeadHeading.textContent = "Head-to-head";
+  }
+  if (elements.personalStatsHistoryHeading) {
+    elements.personalStatsHistoryHeading.textContent = "Event history";
+  }
+
+  renderDetailedPersonalStats(userId, personalEntries, canonicalFriendMatches, elements.statsPersonal);
+  renderHeadToHeadStats(userId, canonicalFriendMatches, elements.personalHeadToHead);
+  renderPersonalHistoryToTarget(userId, personalEntries, elements.statsHistory);
 }
 
-function renderDetailedPersonalStats(personalEntries, canonicalFriendMatches, targetElement) {
+function renderActivityFeed() {
+  if (!elements.activityFeed) {
+    return;
+  }
+
+  const recentEntries = [...matchEntries]
+    .sort((left, right) =>
+      getMatchActivityTimestamp(right) - getMatchActivityTimestamp(left) ||
+      (Number(right.id) || 0) - (Number(left.id) || 0)
+    )
+    .slice(0, 3);
+
+  if (!recentEntries.length) {
+    elements.activityFeed.innerHTML = '<div class="empty-state">No matches tracked yet. Your latest logged rounds will show up here.</div>';
+    return;
+  }
+
+  elements.activityFeed.innerHTML = recentEntries.map(entry => {
+    const event = events.find(item => item.id === entry.eventId);
+    const set = event ? getSet(event.set) : null;
+    const reporterName = getUserName(entry.userId);
+    const opponentName = getOpponentDisplayName(entry);
+    const matchingEvents = event ? getMatchingEvents(event.date, event.set, event.location, event.format) : [];
+    const subtitleParts = [
+      set?.name || event?.set || "Unknown event",
+      matchingEvents.length > 1 ? `Event ${event.index}` : "",
+      `Round ${entry.round}`
+    ].filter(Boolean);
+
+    return createActivityCard({
+      reporterId: entry.userId,
+      reporterName,
+      opponentUserId: entry.opponentKind === "tracked" ? entry.opponentUserId : null,
+      opponentName,
+      opponentKind: entry.opponentKind
+    }, subtitleParts.join(" - "), [
+      describeMatchResult(entry),
+      event ? formatDate(event.date) : "Unknown date",
+      event?.location || "Unknown location"
+    ], "screen-start");
+  }).join("");
+}
+
+function renderDetailedPersonalStats(userId, personalEntries, canonicalFriendMatches, targetElement) {
   if (!personalEntries.length) {
     targetElement.innerHTML = '<div class="empty-state">No personal matches logged yet for this user.</div>';
     return;
@@ -1471,8 +3351,8 @@ function renderDetailedPersonalStats(personalEntries, canonicalFriendMatches, ta
 
   const overall = computeEntryStats(personalEntries);
   const friendOnly = computeEntryStats(personalEntries.filter(entry => entry.opponentKind === "tracked"));
-  const profileSummary = getProfileSummary(activeUserId);
-  const matchupSummary = getPersonalMatchupSummary(canonicalFriendMatches, activeUserId);
+  const profileSummary = getProfileSummary(userId);
+  const matchupSummary = getPersonalMatchupSummary(canonicalFriendMatches, userId);
   const colorSummary = getPersonalColorSummary(personalEntries);
 
   targetElement.innerHTML = `
@@ -1492,6 +3372,33 @@ function renderDetailedPersonalStats(personalEntries, canonicalFriendMatches, ta
       `Top archetype: ${profileSummary.archetype}`
     ])}
   `;
+}
+
+function renderNamedOpponentStatsPage(opponentName) {
+  const opponentEntries = getNamedOpponentEntries(opponentName);
+
+  if (elements.personalStatsEyebrow) {
+    elements.personalStatsEyebrow.textContent = "Opponent";
+  }
+  if (elements.personalStatsTitle) {
+    elements.personalStatsTitle.textContent = opponentName;
+  }
+  if (elements.personalStatsSubtitle) {
+    elements.personalStatsSubtitle.textContent = "Stats from logged matches against this opponent.";
+  }
+  if (elements.personalStatsSnapshotHeading) {
+    elements.personalStatsSnapshotHeading.textContent = "Snapshot";
+  }
+  if (elements.personalStatsHeadToHeadHeading) {
+    elements.personalStatsHeadToHeadHeading.textContent = "Tracked matchups";
+  }
+  if (elements.personalStatsHistoryHeading) {
+    elements.personalStatsHistoryHeading.textContent = "Event history";
+  }
+
+  renderNamedOpponentSummary(opponentName, opponentEntries, elements.statsPersonal);
+  renderNamedOpponentHeadToHead(opponentName, opponentEntries, elements.personalHeadToHead);
+  renderNamedOpponentHistory(opponentName, opponentEntries, elements.statsHistory);
 }
 
 function renderGlobalLeaderboardStats(activeUsersWithMatches) {
@@ -1594,13 +3501,13 @@ function renderFriendsLeaderboardStats(canonicalFriendMatches) {
   ).join("");
 }
 
-function renderHeadToHeadStats(canonicalFriendMatches, targetElement) {
+function renderHeadToHeadStats(userId, canonicalFriendMatches, targetElement) {
     const rows = users
-      .filter(user => user.id !== activeUserId)
+      .filter(user => user.id !== userId)
       .map(user => {
         const matches = canonicalFriendMatches.filter(match =>
-          (match.playerAId === activeUserId && match.playerBId === user.id) ||
-        (match.playerBId === activeUserId && match.playerAId === user.id)
+          (match.playerAId === userId && match.playerBId === user.id) ||
+        (match.playerBId === userId && match.playerAId === user.id)
       );
 
       if (!matches.length) {
@@ -1614,7 +3521,7 @@ function renderHeadToHeadStats(canonicalFriendMatches, targetElement) {
       let gamesLost = 0;
 
       matches.forEach(match => {
-        if (match.winnerId === activeUserId) {
+        if (match.winnerId === userId) {
           wins += 1;
         } else if (match.winnerId === user.id) {
           losses += 1;
@@ -1622,7 +3529,7 @@ function renderHeadToHeadStats(canonicalFriendMatches, targetElement) {
           draws += 1;
         }
 
-        if (match.playerAId === activeUserId) {
+        if (match.playerAId === userId) {
           gamesWon += match.gamesA;
           gamesLost += match.gamesB;
         } else {
@@ -1713,10 +3620,13 @@ function renderRivalryStats(canonicalFriendMatches, targetElement) {
 }
 
 function renderPersonalHistory(personalEntries) {
-  renderPersonalHistoryToTarget(personalEntries, elements.statsHistory);
+  const subject = getViewedPersonalStatsSubject();
+  if (subject.kind === "tracked") {
+    renderPersonalHistoryToTarget(subject.userId, personalEntries, elements.statsHistory);
+  }
 }
 
-function renderPersonalHistoryToTarget(personalEntries, targetElement) {
+function renderPersonalHistoryToTarget(userId, personalEntries, targetElement) {
   if (!personalEntries.length) {
     targetElement.innerHTML = '<div class="empty-state">No event history yet for this user.</div>';
     return;
@@ -1733,7 +3643,7 @@ function renderPersonalHistoryToTarget(personalEntries, targetElement) {
   const rows = [...grouped.entries()]
     .map(([eventId, entries]) => {
       const event = events.find(item => item.id === eventId);
-      const profile = eventProfiles.find(item => item.eventId === eventId && item.userId === activeUserId);
+      const profile = eventProfiles.find(item => item.eventId === eventId && item.userId === userId);
       const stats = computeEntryStats(entries);
       return { event, profile, stats };
     })
@@ -1758,8 +3668,9 @@ function buildCanonicalFriendMatches() {
   matchEntries
     .filter(entry => entry.opponentKind === "tracked" && entry.opponentUserId)
     .forEach(entry => {
-      const playerAId = Math.min(entry.userId, entry.opponentUserId);
-      const playerBId = Math.max(entry.userId, entry.opponentUserId);
+      const orderedIds = [normalizeUserId(entry.userId), normalizeUserId(entry.opponentUserId)]
+        .sort(compareUserIds);
+      const [playerAId, playerBId] = orderedIds;
       const key = `${entry.eventId}|${entry.round}|${playerAId}|${playerBId}`;
       if (map.has(key)) {
         return;
@@ -1945,6 +3856,239 @@ function getPersonalColorSummary(entries) {
   };
 }
 
+function getNamedOpponentEntries(opponentName) {
+  const normalizedName = normalize(opponentName || "");
+  return matchEntries.filter(entry =>
+    entry.opponentKind === "named" &&
+    normalize(entry.opponentName || "") === normalizedName
+  );
+}
+
+function computeOpponentPerspectiveStats(entries) {
+  const reporterStats = computeEntryStats(entries);
+  const gameTotals = entries.reduce((totals, entry) => {
+    const parsedScore = parseScore(entry.score);
+    return {
+      won: totals.won + parsedScore.lost,
+      lost: totals.lost + parsedScore.won
+    };
+  }, { won: 0, lost: 0 });
+
+  return {
+    matches: reporterStats.matches,
+    wins: reporterStats.losses,
+    losses: reporterStats.wins,
+    draws: reporterStats.draws,
+    matchWinRate: calculateRate(reporterStats.losses, reporterStats.matches),
+    gameWinRate: calculateRate(gameTotals.won, gameTotals.won + gameTotals.lost)
+  };
+}
+
+function getNamedOpponentMatchupSummary(opponentName, entries) {
+  const rows = entries.reduce((map, entry) => {
+    const reporterId = normalizeUserId(entry.userId);
+    if (!reporterId || !users.some(user => user.id === reporterId)) {
+      return map;
+    }
+
+    if (!map.has(reporterId)) {
+      map.set(reporterId, {
+        reporterId,
+        meetings: 0,
+        wins: 0,
+        losses: 0,
+        draws: 0
+      });
+    }
+
+    const row = map.get(reporterId);
+    row.meetings += 1;
+
+    if (entry.result === "loss") {
+      row.wins += 1;
+    } else if (entry.result === "win") {
+      row.losses += 1;
+    } else {
+      row.draws += 1;
+    }
+
+    return map;
+  }, new Map());
+
+  const matchupRows = [...rows.values()].map(row => ({
+    ...row,
+    matchWinRate: calculateRate(row.wins, row.meetings)
+  }));
+
+  if (!matchupRows.length) {
+    return {
+      subtitle: "No tracked matchups logged yet",
+      toughest: "Not enough data",
+      best: "Not enough data",
+      rival: "Not enough data"
+    };
+  }
+
+  const toughest = [...matchupRows]
+    .sort((left, right) =>
+      left.matchWinRate - right.matchWinRate ||
+      right.meetings - left.meetings ||
+      left.wins - right.wins
+    )[0];
+
+  const best = [...matchupRows]
+    .sort((left, right) =>
+      right.matchWinRate - left.matchWinRate ||
+      right.meetings - left.meetings ||
+      right.wins - left.wins
+    )[0];
+
+  const rival = [...matchupRows]
+    .sort((left, right) =>
+      right.meetings - left.meetings ||
+      Math.abs(left.wins - left.losses) - Math.abs(right.wins - right.losses)
+    )[0];
+
+  return {
+    subtitle: `${matchupRows.length} tracked player matchup${matchupRows.length === 1 ? "" : "s"} logged`,
+    toughest: `${getUserName(toughest.reporterId)} (${toughest.wins}-${toughest.losses}-${toughest.draws})`,
+    best: `${getUserName(best.reporterId)} (${best.wins}-${best.losses}-${best.draws})`,
+    rival: `${getUserName(rival.reporterId)} (${rival.meetings} meeting${rival.meetings === 1 ? "" : "s"})`
+  };
+}
+
+function getNamedOpponentEventSummary(entries) {
+  const relevantEvents = entries
+    .map(entry => events.find(event => event.id === entry.eventId))
+    .filter(Boolean);
+
+  if (!relevantEvents.length) {
+    return {
+      subtitle: "No event data yet",
+      set: "Not enough data",
+      location: "Not enough data",
+      format: "Not enough data"
+    };
+  }
+
+  return {
+    subtitle: `${new Set(relevantEvents.map(event => event.id)).size} event${new Set(relevantEvents.map(event => event.id)).size === 1 ? "" : "s"} logged`,
+    set: mostCommonLabel(relevantEvents.map(event => event.set).filter(Boolean)) || "Not enough data",
+    location: mostCommonLabel(relevantEvents.map(event => event.location).filter(Boolean)) || "Not enough data",
+    format: mostCommonLabel(relevantEvents.map(event => getNormalizedFormat(event.format)).filter(Boolean)) || "Not enough data"
+  };
+}
+
+function renderNamedOpponentSummary(opponentName, opponentEntries, targetElement) {
+  if (!opponentEntries.length) {
+    targetElement.innerHTML = '<div class="empty-state">No logged matches yet for this opponent.</div>';
+    return;
+  }
+
+  const overall = computeOpponentPerspectiveStats(opponentEntries);
+  const matchupSummary = getNamedOpponentMatchupSummary(opponentName, opponentEntries);
+  const eventSummary = getNamedOpponentEventSummary(opponentEntries);
+  const trackedPlayersFaced = new Set(opponentEntries.map(entry => normalizeUserId(entry.userId)).filter(Boolean)).size;
+
+  targetElement.innerHTML = `
+    ${createListCard("Overall", `${overall.wins}-${overall.losses}-${overall.draws} match record`, [
+      `Match win rate: ${formatPercent(overall.matchWinRate)}`,
+      `Game win rate: ${formatPercent(overall.gameWinRate)}`,
+      `Tracked players faced: ${trackedPlayersFaced}`
+    ])}
+    ${createListCard("Matchup story", matchupSummary.subtitle, [
+      `Toughest matchup: ${matchupSummary.toughest}`,
+      `Best matchup: ${matchupSummary.best}`,
+      `Most-played rival: ${matchupSummary.rival}`
+    ])}
+    ${createListCard("Event footprint", eventSummary.subtitle, [
+      `Most-played set: ${eventSummary.set}`,
+      `Most-played location: ${eventSummary.location}`,
+      `Most-seen format: ${eventSummary.format}`
+    ])}
+  `;
+}
+
+function renderNamedOpponentHeadToHead(opponentName, opponentEntries, targetElement) {
+  const rows = users
+    .map(user => {
+      const matches = opponentEntries.filter(entry => normalizeUserId(entry.userId) === user.id);
+      if (!matches.length) {
+        return null;
+      }
+
+      const stats = computeOpponentPerspectiveStats(matches);
+      return {
+        user,
+        matches: stats.matches,
+        wins: stats.wins,
+        losses: stats.losses,
+        draws: stats.draws,
+        gameWinRate: stats.gameWinRate
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => right.matches - left.matches || right.wins - left.wins);
+
+  if (!rows.length) {
+    targetElement.innerHTML = '<div class="empty-state">No tracked players have logged matches against this opponent yet.</div>';
+    return;
+  }
+
+  targetElement.innerHTML = rows.map(row =>
+    createListCard(
+      row.user.name,
+      `${row.wins}-${row.losses}-${row.draws} for ${opponentName}`,
+      [
+        `Meetings: ${row.matches}`,
+        `Game win rate: ${formatPercent(row.gameWinRate)}`,
+        `Series edge: ${row.wins > row.losses ? "Ahead" : row.wins < row.losses ? "Behind" : "Even"}`
+      ]
+    )
+  ).join("");
+}
+
+function renderNamedOpponentHistory(opponentName, opponentEntries, targetElement) {
+  if (!opponentEntries.length) {
+    targetElement.innerHTML = '<div class="empty-state">No event history yet for this opponent.</div>';
+    return;
+  }
+
+  const grouped = new Map();
+  opponentEntries.forEach(entry => {
+    if (!grouped.has(entry.eventId)) {
+      grouped.set(entry.eventId, []);
+    }
+    grouped.get(entry.eventId).push(entry);
+  });
+
+  const rows = [...grouped.entries()]
+    .map(([eventId, entries]) => {
+      const event = events.find(item => item.id === eventId);
+      if (!event) {
+        return null;
+      }
+
+      const stats = computeOpponentPerspectiveStats(entries);
+      const playersFaced = dedupeStrings(entries.map(entry => getUserName(entry.userId)).filter(name => name !== "Unknown player"));
+      return { event, stats, playersFaced, entries };
+    })
+    .filter(Boolean)
+    .sort((left, right) => right.event.date.localeCompare(left.event.date));
+
+  targetElement.innerHTML = rows.map(({ event, stats, playersFaced, entries }) =>
+    createListCard(
+      `${formatDate(event.date)} - ${formatCompactEventLabel(event)}`,
+      `${stats.wins}-${stats.losses}-${stats.draws}`,
+      [
+        `Players faced: ${playersFaced.join(", ") || "Unknown player"}`,
+        `Location: ${event.location || "Unknown location"}`,
+        `Matches logged: ${entries.length}`
+      ]
+    )
+  ).join("");
+}
+
 function createStatTile(value, label) {
   return `<div class="stat-tile"><strong>${value}</strong><span>${label}</span></div>`;
 }
@@ -1961,10 +4105,80 @@ function createListCard(title, subtitle, rows) {
   `;
 }
 
+function createActivityCard(players, subtitle, rows, backId = "screen-start") {
+  const reporterName = players?.reporterName || "Unknown player";
+  const opponentName = players?.opponentName || "Unknown player";
+  const opponentState = getActivityOpponentAvatarState(players?.opponentKind, opponentName);
+
+  return `
+    <article class="list-card activity-card">
+      <div class="activity-player-row">
+        ${renderActivityPlayerBadge(reporterName, "tracked", players?.reporterId, backId)}
+        <span class="activity-player-versus">vs</span>
+        ${renderActivityPlayerBadge(opponentName, opponentState, players?.opponentUserId, backId, players?.opponentKind === "named" ? opponentName : "")}
+      </div>
+      <div class="small text-secondary mt-2">${subtitle}</div>
+      <div class="match-meta">
+        ${rows.map(row => `<span class="meta-pill">${row}</span>`).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderActivityPlayerBadge(name, state = "tracked", userId = "", backId = "screen-start", opponentName = "") {
+  const normalizedUserId = normalizeUserId(userId);
+  const normalizedOpponentName = String(opponentName || "").trim();
+  const canOpenTrackedStats = state === "tracked" && normalizedUserId;
+  const canOpenOpponentStats = state === "mock" && normalizedOpponentName && normalize(normalizedOpponentName) !== "npc opponent";
+  const tagName = canOpenTrackedStats || canOpenOpponentStats ? "button type=\"button\"" : "span";
+  const dataAttributes = canOpenTrackedStats
+    ? ` data-personal-stats-user="${escapeHtml(normalizedUserId)}" data-personal-stats-back="${escapeHtml(backId)}"`
+    : canOpenOpponentStats
+      ? ` data-personal-stats-opponent="${escapeHtml(normalizedOpponentName)}" data-personal-stats-back="${escapeHtml(backId)}"`
+      : "";
+  return `
+    <${tagName} class="activity-player-badge${state !== "tracked" ? ` is-${state}` : ""}${canOpenTrackedStats || canOpenOpponentStats ? " is-clickable" : ""}"${dataAttributes}>
+      ${canOpenTrackedStats
+        ? renderTrackedPlayerAvatar(name, normalizedUserId, "activity-player-avatar")
+        : renderBasicPlayerAvatar(name, "activity-player-avatar")}
+      <span class="activity-player-name">${escapeHtml(name)}</span>
+    </${canOpenTrackedStats || canOpenOpponentStats ? "button" : "span"}>
+  `;
+}
+
+function getActivityOpponentAvatarState(opponentKind, opponentName) {
+  if (opponentKind === "named") {
+    return "mock";
+  }
+
+  if (normalize(opponentName || "") === "npc opponent") {
+    return "npc";
+  }
+
+  return "tracked";
+}
+
 function removeMatch(matchId) {
   const index = matchEntries.findIndex(entry => entry.id === matchId);
   if (index !== -1) {
     matchEntries.splice(index, 1);
+  }
+}
+
+function handlePlayerStatsNavigationClick(event) {
+  const trigger = event.target.closest("[data-personal-stats-user], [data-personal-stats-opponent]");
+  if (!trigger) {
+    return;
+  }
+
+  const backId = trigger.dataset.personalStatsBack || "screen-start";
+  if (trigger.dataset.personalStatsUser) {
+    openPersonalStatsForUser(trigger.dataset.personalStatsUser, backId);
+    return;
+  }
+
+  if (trigger.dataset.personalStatsOpponent) {
+    openPersonalStatsForOpponent(trigger.dataset.personalStatsOpponent, backId);
   }
 }
 
@@ -1990,18 +4204,79 @@ function getEventsOnDate(date) {
     .sort((left, right) => left.index - right.index || left.set.localeCompare(right.set));
 }
 
-function getMatchingEvents(date, set, location) {
+function deleteEventById(eventId) {
+  const event = events.find(entry => entry.id === eventId);
+  if (!event) {
+    return;
+  }
+
+  const relatedProfiles = eventProfiles.filter(profile => profile.eventId === eventId);
+  const relatedMatches = matchEntries.filter(entry => entry.eventId === eventId);
+
+  for (let index = eventProfiles.length - 1; index >= 0; index -= 1) {
+    if (eventProfiles[index].eventId === eventId) {
+      eventProfiles.splice(index, 1);
+    }
+  }
+
+  for (let index = matchEntries.length - 1; index >= 0; index -= 1) {
+    if (matchEntries[index].eventId === eventId) {
+      matchEntries.splice(index, 1);
+    }
+  }
+
+  for (let index = eventPods.length - 1; index >= 0; index -= 1) {
+    if (eventPods[index].eventId === eventId) {
+      eventPods.splice(index, 1);
+    }
+  }
+
+  const eventIndex = events.findIndex(entry => entry.id === eventId);
+  if (eventIndex !== -1) {
+    events.splice(eventIndex, 1);
+  }
+
+  relatedProfiles.forEach(profile => persistDeletedEventProfile(profile));
+  relatedMatches.forEach(entry => persistDeletedMatchEntry(entry));
+  persistDeletedEventRecord(event);
+
+  reindexMatchingEventSeries(event.date, event.set, event.location, event.format);
+
+  if (currentEventId === eventId) {
+    currentEventId = null;
+    closeRoundPrefillModal();
+  }
+
+  renderActivityFeed();
+  syncDateView(event.date);
+  updateAdminUiState();
+}
+
+function reindexMatchingEventSeries(date, set, location, format = "Draft") {
+  const matchingEvents = getMatchingEvents(date, set, location, format);
+  matchingEvents.forEach((event, index) => {
+    const nextIndex = index + 1;
+    if (event.index !== nextIndex) {
+      event.index = nextIndex;
+      persistEventRecord(event);
+    }
+  });
+}
+
+function getMatchingEvents(date, set, location, format = "Draft") {
+  const normalizedFormat = getNormalizedFormat(format);
   return events
     .filter(event =>
       event.date === date &&
       event.set === set &&
+      getNormalizedFormat(event.format) === normalizedFormat &&
       normalize(event.location) === normalize(location)
     )
     .sort((left, right) => left.index - right.index);
 }
 
-function getNextIndex(date, set, location) {
-  const matchingEvents = getMatchingEvents(date, set, location);
+function getNextIndex(date, set, location, format = "Draft") {
+  const matchingEvents = getMatchingEvents(date, set, location, format);
   return matchingEvents.length
     ? Math.max(...matchingEvents.map(event => event.index)) + 1
     : 1;
@@ -2145,17 +4420,20 @@ async function loadManaSymbolCatalogFromScryfall() {
     if (enhancedSelects.deckColors) {
       initializeDeckColorSelectEnhancer();
     }
+
+    renderAuthUi();
   } catch {
     manaSymbolCatalog = {};
+    renderAuthUi();
   }
 }
 
 function getUserName(userId) {
-  return users.find(user => user.id === userId)?.name ?? "Unknown User";
+  return users.find(user => user.id === normalizeUserId(userId))?.name ?? "Unknown player";
 }
 
 function getActiveUserName() {
-  return activeUserId ? getUserName(activeUserId) : "Unknown";
+  return activeUserId ? getUserName(activeUserId) : "Unknown player";
 }
 
 function getOpponentDisplayName(match) {
@@ -2163,6 +4441,50 @@ function getOpponentDisplayName(match) {
     return getUserName(match.opponentUserId);
   }
   return match.opponentName || "NPC Opponent";
+}
+
+function getMatchActivityTimestamp(entry) {
+  if (entry?.persistedAt) {
+    const parsedPersistedAt = Date.parse(entry.persistedAt);
+    if (Number.isFinite(parsedPersistedAt)) {
+      return parsedPersistedAt;
+    }
+  }
+
+  const event = events.find(item => item.id === entry?.eventId);
+  if (event?.date) {
+    const parsedEventDate = Date.parse(`${event.date}T12:00:00`);
+    if (Number.isFinite(parsedEventDate)) {
+      return parsedEventDate;
+    }
+  }
+
+  return Number(entry?.id) || 0;
+}
+
+function describeMatchResult(entry) {
+  const recordLabel = `${entry.score || "0-0"} ${getResultVerb(entry.result)}`;
+  return entry.pod ? `${recordLabel} - ${entry.pod}` : recordLabel;
+}
+
+function getResultVerb(result) {
+  if (result === "win") {
+    return "win";
+  }
+
+  if (result === "loss") {
+    return "loss";
+  }
+
+  return "draw";
+}
+
+function getActivityLoggedLabel(entry) {
+  if (entry?.persistedAt) {
+    return formatDateTime(entry.persistedAt);
+  }
+
+  return "Recently logged";
 }
 
 function getDeckColorLabel(value) {
@@ -2199,9 +4521,13 @@ function getMostPlayedSet() {
 }
 
 function formatCompactEventLabel(event) {
-  const matchingEvents = getMatchingEvents(event.date, event.set, event.location);
+  const matchingEvents = getMatchingEvents(event.date, event.set, event.location, event.format);
   const needsIndex = matchingEvents.length > 1;
   return `${event.set} - ${event.location}${needsIndex ? ` - Event ${event.index}` : ""}`;
+}
+
+function getEventAdminLabel(event) {
+  return `${event.set} - ${event.format || "Draft"} - ${event.location}${getMatchingEvents(event.date, event.set, event.location, event.format).length > 1 ? ` - Event ${event.index}` : ""}`;
 }
 
 function formatDate(dateString) {
@@ -2211,6 +4537,16 @@ function formatDate(dateString) {
     day: "2-digit",
     month: "short",
     year: "numeric"
+  }).format(date);
+}
+
+function formatDateTime(dateString) {
+  const date = new Date(dateString);
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit"
   }).format(date);
 }
 
@@ -2285,8 +4621,26 @@ function dedupeStrings(values) {
 }
 
 function showUserAlert(message) {
-  elements.userAlert.textContent = message;
-  elements.userAlert.classList.remove("d-none");
+  const target = isAuthModalOpen && !currentAuthUser
+    ? elements.authModalAlert
+    : elements.userAlert;
+  if (!target) {
+    return;
+  }
+
+  target.textContent = message;
+  target.classList.remove("d-none");
+}
+
+function hideUserAlert() {
+  [elements.userAlert, elements.authModalAlert].forEach(target => {
+    if (!target) {
+      return;
+    }
+
+    target.textContent = "";
+    target.classList.add("d-none");
+  });
 }
 
 function showDuplicateAlert(message) {
@@ -2309,19 +4663,20 @@ function hideMatchAlert() {
 
 function updatePotentialDuplicateNotice() {
   const set = elements.setSelect.value;
+  const format = elements.eventFormatSelect.value;
   const location = elements.locationSelect.value.trim();
-  if (!currentDate || !set || !location) {
+  if (!currentDate || !set || !format || !location) {
     hideDuplicateAlert();
     return;
   }
 
-  const nextIndex = getNextIndex(currentDate, set, location);
+  const nextIndex = getNextIndex(currentDate, set, location, format);
   if (nextIndex === 1) {
     hideDuplicateAlert();
     return;
   }
 
-  showDuplicateAlert(`A matching event already exists. Saving will ask for confirmation and create Event ${nextIndex}.`);
+  showDuplicateAlert(`A matching event already exists for this set, format, and location. Saving will ask for confirmation and create Event ${nextIndex}.`);
 }
 
 function setDateInputToToday() {
