@@ -56,6 +56,7 @@
             <div class="stats-shortcuts">
               <button class="btn btn-outline-light btn-lg w-100" id="global-stats-button" type="button">Global</button>
               <button class="btn btn-outline-light btn-lg w-100" id="friends-stats-button" type="button">Friends</button>
+              <button class="btn btn-outline-light btn-lg w-100" id="opponents-stats-button" type="button">Opponents</button>
               <button class="btn btn-outline-light btn-lg w-100" id="personal-stats-button" type="button">Personal</button>
             </div>
           </div>
@@ -122,6 +123,25 @@
               </div>
               <div class="col-4">
                 <button class="btn btn-outline-danger w-100 h-100" id="remove-event-button" type="button">Delete</button>
+              </div>
+            </div>
+
+            <label class="form-label mt-3" for="remove-event-player-event-select">Remove player from event</label>
+            <div class="row g-2">
+              <div class="col-12">
+                <div class="select-wrap">
+                  <select class="form-select form-select-lg has-caret" id="remove-event-player-event-select"></select>
+                  <span class="select-caret" aria-hidden="true"></span>
+                </div>
+              </div>
+              <div class="col-8">
+                <div class="select-wrap">
+                  <select class="form-select form-select-lg has-caret" id="remove-event-player-select"></select>
+                  <span class="select-caret" aria-hidden="true"></span>
+                </div>
+              </div>
+              <div class="col-4">
+                <button class="btn btn-outline-danger w-100 h-100" id="remove-event-player-button" type="button">Remove</button>
               </div>
             </div>
           </div>
@@ -340,6 +360,7 @@
             <div class="stats-nav mb-4">
               <button class="btn btn-outline-light btn-sm stats-nav-button is-active" data-stats-view="global" type="button">Global</button>
               <button class="btn btn-outline-light btn-sm stats-nav-button" data-stats-view="friends" type="button">Friends</button>
+              <button class="btn btn-outline-light btn-sm stats-nav-button" data-stats-view="opponents" type="button">Opponents</button>
               <button class="btn btn-outline-light btn-sm stats-nav-button" data-stats-view="personal" type="button">Personal</button>
             </div>
 
@@ -352,6 +373,16 @@
             <div class="stats-section">
               <h3 class="small-heading mb-3">Global leaderboard</h3>
               <div class="list-stack" id="stats-leaderboard"></div>
+            </div>
+
+            <div class="stats-section">
+              <h3 class="small-heading mb-3">Registered players</h3>
+              <div class="stats-roster" id="stats-all-players"></div>
+            </div>
+
+            <div class="stats-section">
+              <h3 class="small-heading mb-3">Opponents</h3>
+              <div class="stats-roster" id="stats-all-opponents"></div>
             </div>
           </div>
         </div>
@@ -366,6 +397,7 @@
             <div class="stats-nav mb-4">
               <button class="btn btn-outline-light btn-sm stats-nav-button" data-stats-view="global" type="button">Global</button>
               <button class="btn btn-outline-light btn-sm stats-nav-button is-active" data-stats-view="friends" type="button">Friends</button>
+              <button class="btn btn-outline-light btn-sm stats-nav-button" data-stats-view="opponents" type="button">Opponents</button>
               <button class="btn btn-outline-light btn-sm stats-nav-button" data-stats-view="personal" type="button">Personal</button>
             </div>
 
@@ -388,6 +420,33 @@
         </div>
       </section>
 
+      <section class="screen" id="screen-opponents-stats">
+        <div class="topbar">
+          <button class="btn btn-link back-link px-0" data-back="screen-start" id="opponents-stats-back-button" type="button">Back</button>
+        </div>
+        <div class="card border-0 shadow-sm">
+          <div class="card-body p-4">
+            <div class="stats-nav mb-4">
+              <button class="btn btn-outline-light btn-sm stats-nav-button" data-stats-view="global" type="button">Global</button>
+              <button class="btn btn-outline-light btn-sm stats-nav-button" data-stats-view="friends" type="button">Friends</button>
+              <button class="btn btn-outline-light btn-sm stats-nav-button is-active" data-stats-view="opponents" type="button">Opponents</button>
+              <button class="btn btn-outline-light btn-sm stats-nav-button" data-stats-view="personal" type="button">Personal</button>
+            </div>
+
+            <p class="eyebrow mb-2">Opponents</p>
+            <h2 class="section-title mb-2">Opponent stats</h2>
+            <p class="text-secondary mb-4" id="opponents-stats-subtitle">Unregistered opponent matchups across the group.</p>
+
+            <div class="stats-grid mb-4" id="opponents-overview-grid"></div>
+
+            <div class="stats-section">
+              <h3 class="small-heading mb-3">Opponent leaderboard</h3>
+              <div class="list-stack" id="opponents-leaderboard"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="screen" id="screen-personal-stats">
         <div class="topbar">
           <button class="btn btn-link back-link px-0" data-back="screen-start" id="personal-stats-back-button" type="button">Back</button>
@@ -397,6 +456,7 @@
             <div class="stats-nav mb-4">
               <button class="btn btn-outline-light btn-sm stats-nav-button" data-stats-view="global" type="button">Global</button>
               <button class="btn btn-outline-light btn-sm stats-nav-button" data-stats-view="friends" type="button">Friends</button>
+              <button class="btn btn-outline-light btn-sm stats-nav-button" data-stats-view="opponents" type="button">Opponents</button>
               <button class="btn btn-outline-light btn-sm stats-nav-button is-active" data-stats-view="personal" type="button">Personal</button>
             </div>
 

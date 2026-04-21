@@ -71,9 +71,8 @@ function matchDocId(matchEntry) {
   return String(matchEntry.id);
 }
 
-function coerceNumber(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : value;
+function normalizeRecordId(value) {
+  return value == null ? "" : String(value);
 }
 
 function normalizeArchetypes(value) {
@@ -247,7 +246,7 @@ export async function loadPersistedState() {
     customOpponents: customOpponents.map(entry => entry.name || "").filter(Boolean),
     events: events.map(event => ({
       ...event,
-      id: coerceNumber(event.id),
+      id: normalizeRecordId(event.id),
       index: Number(event.index) || 1,
       rounds: Number(event.rounds) || 3,
       podCount: Number(event.podCount) || 1
@@ -255,7 +254,7 @@ export async function loadPersistedState() {
     eventProfiles: eventProfiles
       .map(profile => ({
         ...profile,
-        eventId: coerceNumber(profile.eventId),
+        eventId: normalizeRecordId(profile.eventId),
         userId: normalizeUserId(profile.userId),
         archetype: normalizeArchetypes(profile.archetype)
       }))
@@ -263,8 +262,8 @@ export async function loadPersistedState() {
     matchEntries: matchEntries
       .map(entry => ({
         ...entry,
-        id: coerceNumber(entry.id),
-        eventId: coerceNumber(entry.eventId),
+        id: normalizeRecordId(entry.id),
+        eventId: normalizeRecordId(entry.eventId),
         userId: normalizeUserId(entry.userId),
         opponentUserId: entry.opponentUserId == null ? null : normalizeUserId(entry.opponentUserId),
         round: Number(entry.round) || 1,

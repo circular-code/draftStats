@@ -204,6 +204,8 @@ small,
 }
 
 #remove-event-select,
+#remove-event-player-event-select,
+#remove-event-player-select,
 #remove-location-select,
 #remove-opponent-select {
   background: rgba(255, 255, 255, 0.06) !important;
@@ -665,6 +667,23 @@ input.form-control::placeholder {
   line-height: 1;
 }
 
+.inline-deck-colors {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  vertical-align: middle;
+}
+
+.inline-deck-colors .mana-symbol-stack {
+  gap: 0.12rem;
+}
+
+.inline-deck-colors .mana-symbol,
+.inline-deck-colors .mana-pip {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
 input[type="date"]::-webkit-calendar-picker-indicator {
   filter: invert(1) brightness(1.3);
   opacity: 1;
@@ -948,6 +967,7 @@ body.account-modal-open {
 
 .stats-shortcuts {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
 }
 
@@ -1079,7 +1099,7 @@ body.account-modal-open {
 
 .stats-nav {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.55rem;
 }
 
@@ -1162,6 +1182,16 @@ body.account-modal-open {
 .list-stack {
   display: grid;
   gap: 0.8rem;
+}
+
+.stats-roster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem 1rem;
+}
+
+.stats-roster .empty-state {
+  width: 100%;
 }
 
 .create-divider {
@@ -1705,10 +1735,6 @@ button.event-participant-chip {
   .app-shell {
     --app-shell-top-padding: 2rem;
     --app-shell-side-padding: 1rem;
-  }
-
-  .stats-shortcuts {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .field-grid {

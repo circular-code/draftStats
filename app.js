@@ -207,8 +207,6 @@ let isAccountModalOpen = false;
 let isRoundPrefillModalOpen = false;
 let lastShownRoundPrefillKey = "";
 let currentSelectedRound = 1;
-let nextEventId = events.length + 1;
-let nextMatchId = 1;
 let currentScore = "2-0";
 let pendingAccentColor = defaultAccentColor;
 let matchInteractionState = {
@@ -223,6 +221,7 @@ const screens = {
   match: document.getElementById("screen-match"),
   stats: document.getElementById("screen-stats"),
   friendsStats: document.getElementById("screen-friends-stats"),
+  opponentsStats: document.getElementById("screen-opponents-stats"),
   personalStats: document.getElementById("screen-personal-stats")
 };
 
@@ -230,6 +229,7 @@ const elements = {
   trackButton: document.getElementById("track-button"),
   globalStatsButton: document.getElementById("global-stats-button"),
   friendsStatsButton: document.getElementById("friends-stats-button"),
+  opponentsStatsButton: document.getElementById("opponents-stats-button"),
   personalStatsButton: document.getElementById("personal-stats-button"),
   statsShortcutsBlock: document.getElementById("stats-shortcuts-block"),
   authPrimaryRow: document.getElementById("auth-primary-row"),
@@ -287,6 +287,9 @@ const elements = {
   adminEventTools: document.getElementById("admin-event-tools"),
   removeEventSelect: document.getElementById("remove-event-select"),
   removeEventButton: document.getElementById("remove-event-button"),
+  removeEventPlayerEventSelect: document.getElementById("remove-event-player-event-select"),
+  removeEventPlayerSelect: document.getElementById("remove-event-player-select"),
+  removeEventPlayerButton: document.getElementById("remove-event-player-button"),
   adminOpponentTools: document.getElementById("admin-opponent-tools"),
   removeOpponentSelect: document.getElementById("remove-opponent-select"),
   removeOpponentButton: document.getElementById("remove-opponent-button"),
@@ -330,11 +333,17 @@ const elements = {
   statsSubtitle: document.getElementById("stats-subtitle"),
   statsOverviewGrid: document.getElementById("stats-overview-grid"),
   statsLeaderboard: document.getElementById("stats-leaderboard"),
+  statsAllPlayers: document.getElementById("stats-all-players"),
+  statsAllOpponents: document.getElementById("stats-all-opponents"),
   friendsStatsBackButton: document.getElementById("friends-stats-back-button"),
   friendsStatsSubtitle: document.getElementById("friends-stats-subtitle"),
   friendsOverviewGrid: document.getElementById("friends-overview-grid"),
   friendsLeaderboard: document.getElementById("friends-leaderboard"),
   friendsRivalries: document.getElementById("friends-rivalries"),
+  opponentsStatsBackButton: document.getElementById("opponents-stats-back-button"),
+  opponentsStatsSubtitle: document.getElementById("opponents-stats-subtitle"),
+  opponentsOverviewGrid: document.getElementById("opponents-overview-grid"),
+  opponentsLeaderboard: document.getElementById("opponents-leaderboard"),
   activityFeed: document.getElementById("activity-feed"),
   statsHistory: document.getElementById("stats-history"),
   statsPersonal: document.getElementById("stats-personal"),
@@ -382,6 +391,7 @@ async function init() {
   elements.trackButton.addEventListener("click", handleTrackStart);
   elements.globalStatsButton.addEventListener("click", () => openGlobalStats("screen-start"));
   elements.friendsStatsButton.addEventListener("click", () => openFriendsStats("screen-start"));
+  elements.opponentsStatsButton.addEventListener("click", () => openOpponentsStats("screen-start"));
   elements.personalStatsButton.addEventListener("click", () => openPersonalStats("screen-start"));
   elements.googleSignInButton?.addEventListener("click", handleGoogleSignIn);
   elements.emailSignInButton?.addEventListener("click", handleEmailSignIn);
@@ -423,6 +433,8 @@ async function init() {
   elements.createLocationButton.addEventListener("click", handleCreateLocation);
   elements.removeLocationButton?.addEventListener("click", handleRemoveLocation);
   elements.removeEventButton?.addEventListener("click", handleRemoveEvent);
+  elements.removeEventPlayerEventSelect?.addEventListener("change", handleRemoveEventPlayerEventChange);
+  elements.removeEventPlayerButton?.addEventListener("click", handleRemoveEventPlayer);
   elements.newLocationInput.addEventListener("keydown", handleEnterToCreateLocation);
   elements.createOpponentButton.addEventListener("click", handleCreateOpponent);
   elements.removeOpponentButton?.addEventListener("click", handleRemoveOpponent);
@@ -437,6 +449,13 @@ async function init() {
   elements.scoreRow.addEventListener("click", handleScoreClick);
   elements.activityFeed?.addEventListener("click", handlePlayerStatsNavigationClick);
   elements.dateEventList?.addEventListener("click", handlePlayerStatsNavigationClick);
+  elements.statsLeaderboard?.addEventListener("click", handlePlayerStatsNavigationClick);
+  elements.statsAllPlayers?.addEventListener("click", handlePlayerStatsNavigationClick);
+  elements.statsAllOpponents?.addEventListener("click", handlePlayerStatsNavigationClick);
+  elements.friendsLeaderboard?.addEventListener("click", handlePlayerStatsNavigationClick);
+  elements.opponentsLeaderboard?.addEventListener("click", handlePlayerStatsNavigationClick);
+  elements.personalHeadToHead?.addEventListener("click", handlePlayerStatsNavigationClick);
+  elements.friendsRivalries?.addEventListener("click", handlePlayerStatsNavigationClick);
 
   elements.locationSelect.addEventListener("input", updatePotentialDuplicateNotice);
 
@@ -451,6 +470,8 @@ async function init() {
         openGlobalStats("screen-start");
       } else if (target === "friends") {
         openFriendsStats("screen-start");
+      } else if (target === "opponents") {
+        openOpponentsStats("screen-start");
       } else if (target === "personal") {
         openPersonalStats("screen-start");
       }
@@ -492,9 +513,6 @@ async function hydratePersistedState() {
   );
   reconcileTrackedUserOpponentIdentities();
   eventPods.splice(0, eventPods.length);
-
-  nextEventId = Math.max(...events.map(event => Number(event.id) || 0), 0) + 1;
-  nextMatchId = Math.max(...matchEntries.map(entry => Number(entry.id) || 0), 0) + 1;
 }
 
 function mergePersistedUsers(persistedUsers) {
@@ -554,6 +572,19 @@ function replaceStringCollection(targetCollection, values) {
 
 function normalizeUserId(value) {
   return value == null ? "" : String(value);
+}
+
+function normalizeRecordId(value) {
+  return value == null ? "" : String(value);
+}
+
+function createClientRecordId(prefix) {
+  const cryptoApi = globalThis.crypto;
+  if (cryptoApi?.randomUUID) {
+    return `${prefix}_${cryptoApi.randomUUID()}`;
+  }
+
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function compareUserIds(left, right) {
@@ -640,6 +671,7 @@ function updateAdminUiState() {
   }
 
   populateRemoveEventSelect();
+  populateRemoveEventPlayerEventSelect();
   populateRemoveLocationSelect();
   populateRemoveOpponentSelect();
 }
@@ -717,6 +749,70 @@ function populateRemoveEventSelect(selectedValue = "") {
   elements.removeEventSelect.disabled = dayEvents.length === 0;
   if (elements.removeEventButton) {
     elements.removeEventButton.disabled = dayEvents.length === 0;
+  }
+}
+
+function getTrackedParticipantsForEvent(eventId) {
+  return getEventParticipants(eventId).filter(participant => participant.kind === "tracked" && participant.id);
+}
+
+function populateRemoveEventPlayerEventSelect(selectedEventId = "", selectedUserId = "") {
+  if (!elements.removeEventPlayerEventSelect) {
+    return;
+  }
+
+  const selectedDate = currentDate || elements.dateInput?.value || "";
+  const dayEvents = selectedDate ? getEventsOnDate(selectedDate) : [];
+
+  elements.removeEventPlayerEventSelect.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select event...";
+  elements.removeEventPlayerEventSelect.appendChild(placeholder);
+
+  dayEvents.forEach(event => {
+    const option = document.createElement("option");
+    option.value = String(event.id);
+    option.textContent = getEventAdminLabel(event);
+    elements.removeEventPlayerEventSelect.appendChild(option);
+  });
+
+  const optionValues = [...elements.removeEventPlayerEventSelect.options].map(option => option.value);
+  const resolvedEventId = optionValues.includes(String(selectedEventId))
+    ? String(selectedEventId)
+    : "";
+
+  elements.removeEventPlayerEventSelect.value = resolvedEventId;
+  elements.removeEventPlayerEventSelect.disabled = dayEvents.length === 0;
+  populateRemoveEventPlayerSelect(resolvedEventId, selectedUserId);
+}
+
+function populateRemoveEventPlayerSelect(eventId = "", selectedUserId = "") {
+  if (!elements.removeEventPlayerSelect) {
+    return;
+  }
+
+  const normalizedEventId = normalizeRecordId(eventId);
+  const participants = normalizedEventId ? getTrackedParticipantsForEvent(normalizedEventId) : [];
+
+  elements.removeEventPlayerSelect.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select player...";
+  elements.removeEventPlayerSelect.appendChild(placeholder);
+
+  participants.forEach(participant => {
+    const option = document.createElement("option");
+    option.value = participant.id;
+    option.textContent = participant.name;
+    elements.removeEventPlayerSelect.appendChild(option);
+  });
+
+  const optionValues = [...elements.removeEventPlayerSelect.options].map(option => option.value);
+  elements.removeEventPlayerSelect.value = optionValues.includes(String(selectedUserId)) ? String(selectedUserId) : "";
+  elements.removeEventPlayerSelect.disabled = !normalizedEventId || participants.length === 0;
+  if (elements.removeEventPlayerButton) {
+    elements.removeEventPlayerButton.disabled = !normalizedEventId || participants.length === 0;
   }
 }
 
@@ -954,6 +1050,19 @@ function renderSingleManaSymbol(colorCode) {
 
   const fallback = manaSymbolFallbacks[colorCode] || { label: colorCode, className: "generic" };
   return `<span class="mana-pip ${fallback.className}" title="${escapeHtml(fallback.label)}">${escapeHtml(colorCode)}</span>`;
+}
+
+function renderDeckColorSummary(value) {
+  if (!value) {
+    return "Not logged";
+  }
+
+  return `
+    <span class="inline-deck-colors">
+      <span class="mana-symbol-stack">${renderManaSymbols(value)}</span>
+      <span>${escapeHtml(getDeckColorLabel(value))}</span>
+    </span>
+  `;
 }
 
 function setAuthControlsDisabled(isDisabled) {
@@ -1270,6 +1379,7 @@ function renderAuthUi() {
     elements.trackButton,
     elements.globalStatsButton,
     elements.friendsStatsButton,
+    elements.opponentsStatsButton,
     elements.personalStatsButton
   ].forEach(button => {
     if (button) {
@@ -1338,6 +1448,8 @@ function refreshUserBoundUi() {
     renderMatchScreen();
   } else if (screens.personalStats.classList.contains("active") && ensureAuthenticatedSilently()) {
     renderPersonalStatsPage();
+  } else if (screens.opponentsStats.classList.contains("active")) {
+    renderOpponentsStats();
   } else if (screens.stats.classList.contains("active")) {
     renderGlobalStats();
   } else if (screens.friendsStats.classList.contains("active")) {
@@ -1981,7 +2093,7 @@ function handleRemoveEvent() {
     return;
   }
 
-  const selectedEventId = Number(selectedValue);
+  const selectedEventId = normalizeRecordId(selectedValue);
 
   const event = events.find(entry => entry.id === selectedEventId);
   if (!event) {
@@ -1999,6 +2111,43 @@ function handleRemoveEvent() {
   }
 
   deleteEventById(selectedEventId);
+}
+
+function handleRemoveEventPlayerEventChange() {
+  populateRemoveEventPlayerSelect(elements.removeEventPlayerEventSelect?.value || "");
+}
+
+function handleRemoveEventPlayer() {
+  const selectedEventId = normalizeRecordId(elements.removeEventPlayerEventSelect?.value || "");
+  const selectedUserId = normalizeUserId(elements.removeEventPlayerSelect?.value || "");
+
+  if (!selectedEventId) {
+    window.alert("Select an event first.");
+    return;
+  }
+
+  if (!selectedUserId) {
+    window.alert("Select a player to remove.");
+    return;
+  }
+
+  const event = events.find(entry => entry.id === selectedEventId);
+  const user = getUserRecord(selectedUserId);
+  if (!event || !user) {
+    window.alert("That event or player could not be found.");
+    populateRemoveEventPlayerEventSelect(selectedEventId);
+    return;
+  }
+
+  const confirmation = window.confirm(
+    `Remove ${user.name} from ${getEventAdminLabel(event)}?\n\nThis will delete that player's event profile and all logged rounds in that event involving them.`
+  );
+
+  if (!confirmation) {
+    return;
+  }
+
+  removePlayerFromEvent(selectedEventId, selectedUserId);
 }
 
 function handleEventFormatChange() {
@@ -2107,6 +2256,7 @@ function handleMatchNotesInput() {
 
 function handleDoneWithMatch() {
   if (areAllRoundsLogged()) {
+    attemptAutosaveCurrentRound({ force: true });
     showScreen("start");
     return;
   }
@@ -2156,7 +2306,7 @@ function handleSaveEvent(event) {
   }
 
   const createdEvent = {
-    id: nextEventId++,
+    id: createClientRecordId("evt"),
     date,
     set,
     index: nextIndex,
@@ -2249,7 +2399,7 @@ function attemptAutosaveCurrentRound(options = {}) {
     persistedMatchEntry = matchEntries[existingMatchIndex];
   } else {
     matchEntries.push({
-      id: nextMatchId++,
+      id: createClientRecordId("match"),
       ...payload
     });
     persistedMatchEntry = matchEntries[matchEntries.length - 1];
@@ -3204,6 +3354,16 @@ function openFriendsStats(backId) {
   showScreen("friendsStats");
 }
 
+function openOpponentsStats(backId) {
+  if (!ensureAuthenticatedForApp()) {
+    return;
+  }
+
+  elements.opponentsStatsBackButton.dataset.back = backId;
+  renderOpponentsStats();
+  showScreen("opponentsStats");
+}
+
 function openPersonalStats(backId) {
   if (!ensureAuthenticatedForApp()) {
     return;
@@ -3259,6 +3419,7 @@ function renderGlobalStats() {
   ].join("");
 
   renderGlobalLeaderboardStats(activeUsersWithMatches);
+  renderGlobalRosters();
 }
 
 function renderStats() {
@@ -3269,18 +3430,34 @@ function renderFriendsStats() {
   const canonicalFriendMatches = buildCanonicalFriendMatches();
   const activeFriendIds = [...new Set(canonicalFriendMatches.flatMap(match => [match.playerAId, match.playerBId]))];
   const rivalryCount = new Set(canonicalFriendMatches.map(match => `${match.playerAId}-${match.playerBId}`)).size;
-  const topRivalry = getTopRivalryLabel(canonicalFriendMatches);
+  const topRivalry = getTopRivalrySummary(canonicalFriendMatches);
 
   elements.friendsStatsSubtitle.textContent = "Tracked-friend results, rivalries, and in-group standings.";
   elements.friendsOverviewGrid.innerHTML = [
     createStatTile(canonicalFriendMatches.length, "friend matchups"),
     createStatTile(activeFriendIds.length, "active friends"),
     createStatTile(rivalryCount, "rivalries logged"),
-    createStatTile(topRivalry || "-", "top rivalry")
+    createStatTile(topRivalry.label || "-", `top rivalry${topRivalry.score ? ` ${topRivalry.score}` : ""}`)
   ].join("");
 
   renderFriendsLeaderboardStats(canonicalFriendMatches);
   renderRivalryStats(canonicalFriendMatches, elements.friendsRivalries);
+}
+
+function renderOpponentsStats() {
+  const namedOpponentRows = getNamedOpponentLeaderboardRows();
+  const mostPlayedOpponent = [...namedOpponentRows]
+    .sort((left, right) => right.matches - left.matches || left.name.localeCompare(right.name))[0]?.name || "-";
+
+  elements.opponentsStatsSubtitle.textContent = "Unregistered opponent matchups across the group.";
+  elements.opponentsOverviewGrid.innerHTML = [
+    createStatTile(namedOpponentRows.length, "named opponents"),
+    createStatTile(namedOpponentRows.reduce((total, row) => total + row.matches, 0), "matches logged"),
+    createStatTile(new Set(namedOpponentRows.flatMap(row => row.entries.map(entry => entry.eventId))).size, "events represented"),
+    createStatTile(mostPlayedOpponent, "most played opponent")
+  ].join("");
+
+  renderOpponentsLeaderboardStats(namedOpponentRows);
 }
 
 function renderPersonalStatsPage() {
@@ -3372,26 +3549,22 @@ function renderDetailedPersonalStats(userId, personalEntries, canonicalFriendMat
 
   const overall = computeEntryStats(personalEntries);
   const friendOnly = computeEntryStats(personalEntries.filter(entry => entry.opponentKind === "tracked"));
-  const profileSummary = getProfileSummary(userId);
   const matchupSummary = getPersonalMatchupSummary(canonicalFriendMatches, userId);
-  const colorSummary = getPersonalColorSummary(personalEntries);
+  const profileBreakdowns = getPersonalProfileBreakdowns(userId, personalEntries);
 
   targetElement.innerHTML = `
-    ${createListCard("Overall", `${overall.wins}-${overall.losses}-${overall.draws} match record`, [
+    ${createListCard("Overall", "", [
       `Match win rate: ${formatPercent(overall.matchWinRate)}`,
       `Game win rate: ${formatPercent(overall.gameWinRate)}`,
       `Friend-only win rate: ${formatPercent(friendOnly.matchWinRate)}`
     ])}
-    ${createListCard("Matchup story", matchupSummary.subtitle, [
+    ${createListCard("Matchup story", "", [
       `Nemesis: ${matchupSummary.nemesis}`,
       `Best matchup: ${matchupSummary.bestMatchup}`,
       `Most-played rival: ${matchupSummary.rival}`
     ])}
-    ${createListCard("Deck tendencies", profileSummary.primary, [
-      `Most-played colors: ${profileSummary.colors}`,
-      `Best win-rate colors: ${colorSummary.bestColors}`,
-      `Top archetype: ${profileSummary.archetype}`
-    ])}
+    ${createListCard("Color combinations", "", profileBreakdowns.colors.rows)}
+    ${createListCard("Archetypes", "", profileBreakdowns.archetypes.rows)}
   `;
 }
 
@@ -3447,7 +3620,7 @@ function renderGlobalLeaderboardStats(activeUsersWithMatches) {
       [
         `Overall win rate: ${formatPercent(allStats.matchWinRate)}`,
         `Friend-only win rate: ${formatPercent(friendStats.matchWinRate)}`,
-        `Logged matches: ${allStats.matches}`
+        `Matches: ${allStats.matches}`
       ],
       {
         titleHtml: renderLeaderboardTitle(user.id, index + 1, "screen-stats")
@@ -3519,10 +3692,50 @@ function renderFriendsLeaderboardStats(canonicalFriendMatches) {
       [
         `Friend win rate: ${formatPercent(row.matchWinRate)}`,
         `Game win rate: ${formatPercent(row.gameWinRate)}`,
-        `Meetings: ${row.matches}`
+        `Games: ${row.matches}`
       ],
       {
         titleHtml: renderLeaderboardTitle(row.userId, index + 1, "screen-friends-stats")
+      }
+    )
+  ).join("");
+}
+
+function renderGlobalRosters() {
+  const registeredPlayers = [...users]
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const namedOpponents = [...new Set(matchEntries
+    .filter(entry => entry.opponentKind === "named" && normalize(entry.opponentName || "") !== "npc opponent")
+    .map(entry => String(entry.opponentName || "").trim())
+    .filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right));
+
+  elements.statsAllPlayers.innerHTML = registeredPlayers.length
+    ? registeredPlayers.map(user => renderActivityPlayerBadge(user.name, "tracked", user.id, "screen-stats")).join("")
+    : '<div class="empty-state">No registered players yet.</div>';
+
+  elements.statsAllOpponents.innerHTML = namedOpponents.length
+    ? namedOpponents.map(name => renderActivityPlayerBadge(name, "mock", "", "screen-stats", name)).join("")
+    : '<div class="empty-state">No named opponents yet.</div>';
+}
+
+function renderOpponentsLeaderboardStats(rows) {
+  if (!rows.length) {
+    elements.opponentsLeaderboard.innerHTML = '<div class="empty-state">No named-opponent data yet.</div>';
+    return;
+  }
+
+  elements.opponentsLeaderboard.innerHTML = rows.map((row, index) =>
+    createListCard(
+      "",
+      `${row.wins}-${row.losses}-${row.draws} vs tracked players`,
+      [
+        `Match win rate: ${formatPercent(row.matchWinRate)}`,
+        `Game win rate: ${formatPercent(row.gameWinRate)}`,
+        `Matches: ${row.matches}`
+      ],
+      {
+        titleHtml: renderOpponentLeaderboardTitle(row.name, index + 1, "screen-opponents-stats")
       }
     )
   ).join("");
@@ -3584,13 +3797,15 @@ function renderHeadToHeadStats(userId, canonicalFriendMatches, targetElement) {
 
     targetElement.innerHTML = rows.map(row =>
       createListCard(
-        row.user.name,
+        "",
         `${row.wins}-${row.losses}-${row.draws}`,
         [
-          `Meetings: ${row.matches}`,
-        `Game win rate: ${formatPercent(row.gameWinRate)}`,
-        `Series edge: ${row.wins > row.losses ? "Ahead" : row.wins < row.losses ? "Behind" : "Even"}`
-      ]
+          `Games: ${row.matches}`,
+          `Game win rate: ${formatPercent(row.gameWinRate)}`
+        ],
+        {
+          titleHtml: renderTrackedPlayerCardTitle(row.user.id, "screen-personal-stats")
+        }
       )
     ).join("");
   }
@@ -3635,15 +3850,16 @@ function renderRivalryStats(canonicalFriendMatches, targetElement) {
 
     targetElement.innerHTML = rows.map(row =>
       createListCard(
-        `${getUserName(row.playerAId)} vs ${getUserName(row.playerBId)}`,
+        "",
         `${row.winsA}-${row.winsB}-${row.draws}`,
         [
-        `Meetings: ${row.meetings}`,
-        `Most recent shape: ${Math.abs(row.winsA - row.winsB) <= 1 ? "Close rivalry" : "One-sided streak"}`,
-        `Friends only: yes`
-      ]
-    )
-  ).join("");
+          `Games: ${row.meetings}`
+        ],
+        {
+          titleHtml: renderRivalryCardTitle(row.playerAId, row.playerBId, "screen-friends-stats")
+        }
+      )
+    ).join("");
 }
 
 function renderPersonalHistory(personalEntries) {
@@ -3682,8 +3898,8 @@ function renderPersonalHistoryToTarget(userId, personalEntries, targetElement) {
           `${formatDate(event.date)} - ${formatCompactEventLabel(event)}`,
           `${stats.wins}-${stats.losses}-${stats.draws}`,
       [
-        `Pod: ${profile?.pod || "Pod 1"}`,
-        `Deck: ${getDeckColorLabel(profile?.deckColors)} / ${getArchetypeLabel(profile?.archetype)}`,
+        `${profile?.pod || "Pod 1"}`,
+        `Deck: ${getDeckSummaryLabel(profile?.deckColors, profile?.archetype)}`,
         `Matches logged: ${stats.matches}`
       ]
     )
@@ -3742,28 +3958,73 @@ function computeEntryStats(entries) {
   };
 }
 
-function getProfileSummary(userId) {
+function getPersonalProfileBreakdowns(userId, personalEntries) {
   const profiles = eventProfiles.filter(profile => profile.userId === userId);
-  if (!profiles.length) {
-    return {
-      primary: "No deck profile data yet",
-      colors: "Not logged",
-      archetype: "Not logged",
-      events: 0
-    };
-  }
+  const entriesByEventId = personalEntries.reduce((map, entry) => {
+    if (!map.has(entry.eventId)) {
+      map.set(entry.eventId, []);
+    }
+    map.get(entry.eventId).push(entry);
+    return map;
+  }, new Map());
+  const colorCounts = new Map();
+  const archetypeCounts = new Map();
+
+  profiles.forEach(profile => {
+    const profileEntries = entriesByEventId.get(profile.eventId) || [];
+
+    if (profile.deckColors) {
+      const colorRecord = colorCounts.get(profile.deckColors) || { count: 0, entries: [] };
+      colorRecord.count += 1;
+      colorRecord.entries.push(...profileEntries);
+      colorCounts.set(profile.deckColors, colorRecord);
+    }
+
+    normalizeArchetypes(profile.archetype).forEach(archetype => {
+      const archetypeRecord = archetypeCounts.get(archetype) || { count: 0, entries: [] };
+      archetypeRecord.count += 1;
+      archetypeRecord.entries.push(...profileEntries);
+      archetypeCounts.set(archetype, archetypeRecord);
+    });
+  });
 
   return {
-    primary: `${profiles.length} event profile${profiles.length === 1 ? "" : "s"} logged`,
-    colors: mostCommonLabel(profiles.map(profile => getDeckColorLabel(profile.deckColors)).filter(label => label !== "Not logged")) || "Not logged",
-    archetype: mostCommonLabel(profiles.flatMap(profile => normalizeArchetypes(profile.archetype))) || "Not logged",
-    events: profiles.length
+    colors: createProfileBreakdownSummary(
+      colorCounts,
+      "No color combinations logged yet",
+      "No event profiles with deck colors yet",
+      value => renderDeckColorSummary(value)
+    ),
+    archetypes: createProfileBreakdownSummary(
+      archetypeCounts,
+      "No archetypes logged yet",
+      "No event profiles with archetypes yet"
+    )
   };
 }
 
-function getTopRivalryLabel(canonicalFriendMatches) {
+function createProfileBreakdownSummary(counts, emptySubtitle, emptyRow, renderLabel = label => escapeHtml(label)) {
+  const rows = [...counts.entries()]
+    .sort((left, right) => right[1].count - left[1].count || left[0].localeCompare(right[0]))
+    .map(([label, record]) => {
+      const stats = computeEntryStats(record.entries);
+      const eventLabel = `${record.count} event${record.count === 1 ? "" : "s"}`;
+      const winRateLabel = stats.matches ? `${formatPercent(stats.matchWinRate)} WR` : "No matches";
+      return `${renderLabel(label)}: ${eventLabel} - ${winRateLabel}`;
+    });
+
+  return {
+    subtitle: counts.size ? `${counts.size}` : emptySubtitle,
+    rows: rows.length ? rows : [emptyRow]
+  };
+}
+
+function getTopRivalrySummary(canonicalFriendMatches) {
   if (!canonicalFriendMatches.length) {
-    return "";
+    return {
+      label: "",
+      score: ""
+    };
   }
 
   const counts = new Map();
@@ -3772,14 +4033,33 @@ function getTopRivalryLabel(canonicalFriendMatches) {
     if (!counts.has(key)) {
       counts.set(key, {
         label: `${getUserName(match.playerAId)} vs ${getUserName(match.playerBId)}`,
-        meetings: 0
+        meetings: 0,
+        winsA: 0,
+        winsB: 0,
+        draws: 0
       });
     }
-    counts.get(key).meetings += 1;
+    const rivalry = counts.get(key);
+    rivalry.meetings += 1;
+    if (match.winnerId === match.playerAId) {
+      rivalry.winsA += 1;
+    } else if (match.winnerId === match.playerBId) {
+      rivalry.winsB += 1;
+    } else {
+      rivalry.draws += 1;
+    }
   });
 
   const top = [...counts.values()].sort((left, right) => right.meetings - left.meetings)[0];
-  return top ? `${top.label} (${top.meetings})` : "";
+  return top
+    ? {
+      label: top.label,
+      score: `${top.winsA}-${top.winsB}-${top.draws}`
+    }
+    : {
+      label: "",
+      score: ""
+    };
 }
 
 function getPersonalMatchupSummary(canonicalFriendMatches, userId) {
@@ -3846,40 +4126,7 @@ function getPersonalMatchupSummary(canonicalFriendMatches, userId) {
     subtitle: `${matchupRows.length} tracked friend matchup${matchupRows.length === 1 ? "" : "s"} logged`,
     nemesis: `${getUserName(nemesis.opponentId)} (${nemesis.wins}-${nemesis.losses}-${nemesis.draws})`,
     bestMatchup: `${getUserName(bestMatchup.opponentId)} (${bestMatchup.wins}-${bestMatchup.losses}-${bestMatchup.draws})`,
-    rival: `${getUserName(rival.opponentId)} (${rival.meetings} meeting${rival.meetings === 1 ? "" : "s"})`
-  };
-}
-
-function getPersonalColorSummary(entries) {
-  const byColor = entries
-    .filter(entry => entry.deckColors)
-    .reduce((map, entry) => {
-      if (!map.has(entry.deckColors)) {
-        map.set(entry.deckColors, []);
-      }
-      map.get(entry.deckColors).push(entry);
-      return map;
-    }, new Map());
-
-  const rows = [...byColor.entries()].map(([deckColors, colorEntries]) => ({
-    deckColors,
-    stats: computeEntryStats(colorEntries)
-  }));
-
-  if (!rows.length) {
-    return {
-      bestColors: "Not logged"
-    };
-  }
-
-  const best = [...rows]
-    .sort((left, right) =>
-      right.stats.matchWinRate - left.stats.matchWinRate ||
-      right.stats.matches - left.stats.matches
-    )[0];
-
-  return {
-    bestColors: `${getDeckColorLabel(best.deckColors)} (${formatPercent(best.stats.matchWinRate)})`
+    rival: `${getUserName(rival.opponentId)} (${rival.meetings} game${rival.meetings === 1 ? "" : "s"})`
   };
 }
 
@@ -3889,6 +4136,41 @@ function getNamedOpponentEntries(opponentName) {
     entry.opponentKind === "named" &&
     normalize(entry.opponentName || "") === normalizedName
   );
+}
+
+function getNamedOpponentLeaderboardRows() {
+  const names = [...new Set(matchEntries
+    .filter(entry => entry.opponentKind === "named" && normalize(entry.opponentName || "") !== "npc opponent")
+    .map(entry => String(entry.opponentName || "").trim())
+    .filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right));
+
+  return names
+    .map(name => {
+      const entries = getNamedOpponentEntries(name);
+      if (!entries.length) {
+        return null;
+      }
+
+      const stats = computeOpponentPerspectiveStats(entries);
+      return {
+        name,
+        entries,
+        matches: stats.matches,
+        wins: stats.wins,
+        losses: stats.losses,
+        draws: stats.draws,
+        matchWinRate: stats.matchWinRate,
+        gameWinRate: stats.gameWinRate,
+        trackedPlayersFaced: new Set(entries.map(entry => normalizeUserId(entry.userId)).filter(Boolean)).size
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) =>
+      right.matchWinRate - left.matchWinRate ||
+      right.matches - left.matches ||
+      left.name.localeCompare(right.name)
+    );
 }
 
 function computeOpponentPerspectiveStats(entries) {
@@ -3980,7 +4262,7 @@ function getNamedOpponentMatchupSummary(opponentName, entries) {
     subtitle: `${matchupRows.length} tracked player matchup${matchupRows.length === 1 ? "" : "s"} logged`,
     toughest: `${getUserName(toughest.reporterId)} (${toughest.wins}-${toughest.losses}-${toughest.draws})`,
     best: `${getUserName(best.reporterId)} (${best.wins}-${best.losses}-${best.draws})`,
-    rival: `${getUserName(rival.reporterId)} (${rival.meetings} meeting${rival.meetings === 1 ? "" : "s"})`
+    rival: `${getUserName(rival.reporterId)} (${rival.meetings} game${rival.meetings === 1 ? "" : "s"})`
   };
 }
 
@@ -4018,17 +4300,17 @@ function renderNamedOpponentSummary(opponentName, opponentEntries, targetElement
   const trackedPlayersFaced = new Set(opponentEntries.map(entry => normalizeUserId(entry.userId)).filter(Boolean)).size;
 
   targetElement.innerHTML = `
-    ${createListCard("Overall", `${overall.wins}-${overall.losses}-${overall.draws} match record`, [
+    ${createListCard("Overall", "", [
       `Match win rate: ${formatPercent(overall.matchWinRate)}`,
       `Game win rate: ${formatPercent(overall.gameWinRate)}`,
       `Tracked players faced: ${trackedPlayersFaced}`
     ])}
-    ${createListCard("Matchup story", matchupSummary.subtitle, [
+    ${createListCard("Matchup story", "", [
       `Toughest matchup: ${matchupSummary.toughest}`,
       `Best matchup: ${matchupSummary.best}`,
       `Most-played rival: ${matchupSummary.rival}`
     ])}
-    ${createListCard("Event footprint", eventSummary.subtitle, [
+    ${createListCard("Event footprint", "", [
       `Most-played set: ${eventSummary.set}`,
       `Most-played location: ${eventSummary.location}`,
       `Most-seen format: ${eventSummary.format}`
@@ -4064,13 +4346,15 @@ function renderNamedOpponentHeadToHead(opponentName, opponentEntries, targetElem
 
   targetElement.innerHTML = rows.map(row =>
     createListCard(
-      row.user.name,
+      "",
       `${row.wins}-${row.losses}-${row.draws} for ${opponentName}`,
       [
-        `Meetings: ${row.matches}`,
-        `Game win rate: ${formatPercent(row.gameWinRate)}`,
-        `Series edge: ${row.wins > row.losses ? "Ahead" : row.wins < row.losses ? "Behind" : "Even"}`
-      ]
+        `Games: ${row.matches}`,
+        `Game win rate: ${formatPercent(row.gameWinRate)}`
+      ],
+      {
+        titleHtml: renderTrackedPlayerCardTitle(row.user.id, "screen-personal-stats")
+      }
     )
   ).join("");
 }
@@ -4125,7 +4409,7 @@ function createListCard(title, subtitle, rows, options = {}) {
   return `
     <article class="list-card">
       ${titleMarkup}
-      <div class="small text-secondary mt-1">${subtitle}</div>
+      ${subtitle ? `<div class="small text-secondary mt-1">${subtitle}</div>` : ""}
       <div class="match-meta">
         ${rows.map(row => `<span class="meta-pill">${row}</span>`).join("")}
       </div>
@@ -4139,6 +4423,29 @@ function renderLeaderboardTitle(userId, rank, backId) {
     <div class="leaderboard-card-title">
       <span class="leaderboard-rank">#${rank}</span>
       ${renderActivityPlayerBadge(playerName, "tracked", userId, backId)}
+    </div>
+  `;
+}
+
+function renderOpponentLeaderboardTitle(opponentName, rank, backId) {
+  return `
+    <div class="leaderboard-card-title">
+      <span class="leaderboard-rank">#${rank}</span>
+      ${renderActivityPlayerBadge(opponentName, "mock", "", backId, opponentName)}
+    </div>
+  `;
+}
+
+function renderTrackedPlayerCardTitle(userId, backId) {
+  return renderActivityPlayerBadge(getUserName(userId), "tracked", userId, backId);
+}
+
+function renderRivalryCardTitle(leftUserId, rightUserId, backId) {
+  return `
+    <div class="activity-player-row">
+      ${renderTrackedPlayerCardTitle(leftUserId, backId)}
+      <span class="activity-player-versus">vs</span>
+      ${renderTrackedPlayerCardTitle(rightUserId, backId)}
     </div>
   `;
 }
@@ -4287,6 +4594,60 @@ function deleteEventById(eventId) {
 
   renderActivityFeed();
   syncDateView(event.date);
+  updateAdminUiState();
+}
+
+function removePlayerFromEvent(eventId, userId) {
+  const event = events.find(entry => entry.id === eventId);
+  if (!event) {
+    return;
+  }
+
+  const relatedProfiles = eventProfiles.filter(profile =>
+    profile.eventId === eventId &&
+    normalizeUserId(profile.userId) === userId
+  );
+  const relatedMatches = matchEntries.filter(entry =>
+    entry.eventId === eventId &&
+    (
+      normalizeUserId(entry.userId) === userId ||
+      (entry.opponentKind === "tracked" && normalizeUserId(entry.opponentUserId) === userId)
+    )
+  );
+
+  for (let index = eventProfiles.length - 1; index >= 0; index -= 1) {
+    if (
+      eventProfiles[index].eventId === eventId &&
+      normalizeUserId(eventProfiles[index].userId) === userId
+    ) {
+      eventProfiles.splice(index, 1);
+    }
+  }
+
+  for (let index = matchEntries.length - 1; index >= 0; index -= 1) {
+    if (
+      matchEntries[index].eventId === eventId &&
+      (
+        normalizeUserId(matchEntries[index].userId) === userId ||
+        (matchEntries[index].opponentKind === "tracked" && normalizeUserId(matchEntries[index].opponentUserId) === userId)
+      )
+    ) {
+      matchEntries.splice(index, 1);
+    }
+  }
+
+  relatedProfiles.forEach(profile => persistDeletedEventProfile(profile));
+  relatedMatches.forEach(entry => persistDeletedMatchEntry(entry));
+
+  if (currentEventId === eventId && activeUserId === userId) {
+    currentEventId = null;
+    closeRoundPrefillModal();
+    showScreen("date");
+  }
+
+  renderActivityFeed();
+  syncDateView(event.date);
+  populateRemoveEventPlayerEventSelect(eventId);
   updateAdminUiState();
 }
 
@@ -4539,6 +4900,15 @@ function getDeckColorLabel(value) {
 function getArchetypeLabel(value) {
   const archetypes = normalizeArchetypes(value);
   return archetypes.length ? archetypes.join(", ") : "No archetype";
+}
+
+function getDeckSummaryLabel(deckColors, archetype) {
+  const parts = [renderDeckColorSummary(deckColors)];
+  const archetypeLabel = normalizeArchetypes(archetype).join(", ");
+  if (archetypeLabel) {
+    parts.push(escapeHtml(archetypeLabel));
+  }
+  return parts.join(" / ");
 }
 
 function getMostPlayedSet() {
