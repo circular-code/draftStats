@@ -89,7 +89,8 @@ let manaSymbolCatalog = {};
 
 const enhancedSelects = {
   set: null,
-  deckColors: null
+  deckColors: null,
+  archetypes: null
 };
 
 const manaSymbolFallbacks = {
@@ -209,6 +210,8 @@ let lastShownRoundPrefillKey = "";
 let currentSelectedRound = 1;
 let currentScore = "2-0";
 let pendingAccentColor = defaultAccentColor;
+let navigationHistoryIndex = 0;
+let isRestoringNavigationState = false;
 let matchInteractionState = {
   opponent: false,
   score: false
@@ -460,7 +463,7 @@ async function init() {
   elements.locationSelect.addEventListener("input", updatePotentialDuplicateNotice);
 
   document.querySelectorAll("[data-back]").forEach(button => {
-    button.addEventListener("click", () => showScreenById(button.dataset.back));
+    button.addEventListener("click", () => handleBackNavigation(button.dataset.back));
   });
 
   document.querySelectorAll("[data-stats-view]").forEach(button => {
@@ -479,11 +482,13 @@ async function init() {
   });
 
   document.addEventListener("keydown", handleGlobalKeydown);
+  window.addEventListener("popstate", handleBrowserPopState);
 
   updateScoreUi();
   updateAdminUiState();
   renderActivityFeed();
   renderAuthUi();
+  initializeNavigationHistory();
   subscribeToAuthState(handleAuthStateChange);
 }
 
@@ -906,6 +911,7 @@ function persistDeletedMatchEntry(matchEntry) {
 function initializeEnhancedSelects() {
   initializeSetSelectEnhancer();
   initializeDeckColorSelectEnhancer();
+  initializeArchetypeSelectEnhancer();
 }
 
 function initializeSetSelectEnhancer() {
@@ -1025,6 +1031,86 @@ function initializeDeckColorSelectEnhancer() {
   });
 
   enhancedSelects.deckColors.setValue(selectedValue || "", true);
+}
+
+function initializeArchetypeSelectEnhancer() {
+  if (typeof TomSelect === "undefined" || !elements.archetypeSelect) {
+    return;
+  }
+
+  const selectedValues = normalizeArchetypes([...elements.archetypeSelect.selectedOptions].map(option => option.value));
+  if (enhancedSelects.archetypes) {
+    enhancedSelects.archetypes.destroy();
+  }
+
+  enhancedSelects.archetypes = new TomSelect(elements.archetypeSelect, {
+    maxItems: null,
+    create: false,
+    hidePlaceholder: true,
+    hideSelected: false,
+    closeAfterSelect: false,
+    searchField: ["text", "value"],
+    controlInput: null,
+    render: {
+      option: (data, escape) => `
+        <div class="rich-option rich-option-archetype">
+          <div class="rich-option-copy">
+            <div class="rich-option-title">${escape(data.text || data.value || "")}</div>
+          </div>
+        </div>
+      `,
+      item: (data, escape) => `
+        <div class="rich-item rich-item-archetype">
+          <span class="rich-item-label">${escape(data.text || data.value || "")}</span>
+        </div>
+      `
+    },
+    onChange: values => {
+      const nextValues = Array.isArray(values) ? values : [values].filter(Boolean);
+      [...elements.archetypeSelect.options].forEach(option => {
+        option.selected = nextValues.includes(option.value);
+      });
+      saveCurrentProfile();
+      syncArchetypeDropdownSelectionState(this);
+    },
+    onInitialize() {
+      this.dropdown_content.addEventListener("mousedown", event => {
+        const option = event.target.closest("[data-selectable]");
+        if (!option) {
+          return;
+        }
+
+        const value = option.dataset.value;
+        if (!value || !this.items.includes(value)) {
+          return;
+        }
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        this.removeItem(value);
+        this.refreshOptions(false);
+        syncArchetypeDropdownSelectionState(this);
+      });
+
+      syncArchetypeDropdownSelectionState(this);
+    },
+    onDropdownOpen() {
+      syncArchetypeDropdownSelectionState(this);
+    }
+  });
+
+  enhancedSelects.archetypes.setValue(selectedValues, true);
+}
+
+function syncArchetypeDropdownSelectionState(instance) {
+  if (!instance?.dropdown_content) {
+    return;
+  }
+
+  const selectedValues = new Set(instance.items || []);
+  instance.dropdown_content.querySelectorAll("[data-selectable]").forEach(option => {
+    option.classList.toggle("is-selected", selectedValues.has(option.dataset.value || ""));
+  });
 }
 
 function renderSetIcon(data) {
@@ -1550,6 +1636,7 @@ async function handleAuthStateChange(user) {
     closeAccountModal();
     closeRoundPrefillModal();
     showScreen("start");
+    syncNavigationHistory("replace", "screen-start");
     refreshUserBoundUi();
     return;
   }
@@ -1833,6 +1920,7 @@ async function handleSignOut() {
     await signOutCurrentUser();
     closeAccountModal();
     showScreen("start");
+    syncNavigationHistory("replace", "screen-start");
   } catch (error) {
     showAccountModalAlert(getFriendlyAuthError(error));
   } finally {
@@ -1947,6 +2035,7 @@ function handleTrackStart() {
   renderCalendar();
   syncDateView(elements.dateInput.value);
   showScreen("date");
+  syncNavigationHistory("push", "screen-date");
 }
 
 function mergeNamedOpponentIntoTrackedUser(createdUser, options = {}) {
@@ -2258,6 +2347,7 @@ function handleDoneWithMatch() {
   if (areAllRoundsLogged()) {
     attemptAutosaveCurrentRound({ force: true });
     showScreen("start");
+    syncNavigationHistory("push", "screen-start");
     return;
   }
 
@@ -2325,6 +2415,7 @@ function handleSaveEvent(event) {
   syncDateView(date);
   renderMatchScreen();
   showScreen("match");
+  syncNavigationHistory("push", "screen-match");
 }
 
 function attemptAutosaveCurrentRound(options = {}) {
@@ -2710,15 +2801,18 @@ function populateDeckColorSelect(selectedValue = "") {
 
 function populateArchetypeSelect(selectedValue = "") {
   const selectedArchetypes = normalizeArchetypes(selectedValue);
-  const selectedArchetype = selectedArchetypes[0] || "";
-  elements.archetypeSelect.innerHTML = '<option value="">Choose...</option>';
+  elements.archetypeSelect.innerHTML = "";
   archetypeOptions.forEach(archetype => {
     const option = document.createElement("option");
     option.value = archetype;
     option.textContent = archetype;
+    option.selected = selectedArchetypes.includes(archetype);
     elements.archetypeSelect.appendChild(option);
   });
-  elements.archetypeSelect.value = selectedArchetype;
+
+  if (enhancedSelects.archetypes) {
+    initializeArchetypeSelectEnhancer();
+  }
 }
 
 function populateOpponentSelect(selectedValue = "") {
@@ -2801,6 +2895,189 @@ function setSelectOpen(selectElement, isOpen) {
 
 function getSelectOpen(selectElement) {
   return selectElement.dataset.open === "true";
+}
+
+function getActiveScreenId() {
+  return Object.values(screens).find(screen => screen.classList.contains("active"))?.id || "screen-start";
+}
+
+function isManagedNavigationState(state) {
+  return Boolean(state && state.__draftStatsNavigation === true);
+}
+
+function cloneViewedPersonalStatsSubject(subject) {
+  if (!subject || typeof subject !== "object") {
+    return null;
+  }
+
+  if (subject.kind === "tracked") {
+    return createTrackedPersonalStatsSubject(subject.userId);
+  }
+
+  if (subject.kind === "named") {
+    return createNamedOpponentPersonalStatsSubject(subject.name);
+  }
+
+  return null;
+}
+
+function createNavigationState(screenId = getActiveScreenId()) {
+  return {
+    __draftStatsNavigation: true,
+    historyIndex: navigationHistoryIndex,
+    screenId,
+    currentDate: currentDate || elements.dateInput?.value || getTodayIsoLocal(),
+    currentCalendarMonth: currentCalendarMonth || getMonthStartIso(currentDate || elements.dateInput?.value || getTodayIsoLocal()),
+    currentEventId: currentEventId || "",
+    currentMatchBack,
+    currentSelectedRound,
+    viewedPersonalStatsSubject: cloneViewedPersonalStatsSubject(viewedPersonalStatsSubject),
+    statsBackId: elements.statsBackButton?.dataset.back || "screen-start",
+    friendsBackId: elements.friendsStatsBackButton?.dataset.back || "screen-start",
+    opponentsBackId: elements.opponentsStatsBackButton?.dataset.back || "screen-start",
+    personalBackId: elements.personalStatsBackButton?.dataset.back || "screen-start"
+  };
+}
+
+function applyNavigationState(state) {
+  const nextState = isManagedNavigationState(state) ? state : createNavigationState();
+  const nextDate = nextState.currentDate || elements.dateInput?.value || getTodayIsoLocal();
+  currentCalendarMonth = nextState.currentCalendarMonth || getMonthStartIso(nextDate);
+  syncDateView(nextDate);
+
+  currentEventId = nextState.currentEventId || null;
+  currentMatchBack = nextState.currentMatchBack || "screen-date";
+  currentSelectedRound = Number.isInteger(nextState.currentSelectedRound) ? nextState.currentSelectedRound : Number(nextState.currentSelectedRound) || 1;
+  viewedPersonalStatsSubject = cloneViewedPersonalStatsSubject(nextState.viewedPersonalStatsSubject) || createTrackedPersonalStatsSubject(activeUserId);
+
+  if (elements.matchBackButton) {
+    elements.matchBackButton.dataset.back = currentMatchBack;
+  }
+  if (elements.statsBackButton) {
+    elements.statsBackButton.dataset.back = nextState.statsBackId || "screen-start";
+  }
+  if (elements.friendsStatsBackButton) {
+    elements.friendsStatsBackButton.dataset.back = nextState.friendsBackId || "screen-start";
+  }
+  if (elements.opponentsStatsBackButton) {
+    elements.opponentsStatsBackButton.dataset.back = nextState.opponentsBackId || "screen-start";
+  }
+  if (elements.personalStatsBackButton) {
+    elements.personalStatsBackButton.dataset.back = nextState.personalBackId || "screen-start";
+  }
+
+  switch (nextState.screenId) {
+    case "screen-date":
+      showScreen("date");
+      return;
+    case "screen-details":
+      currentDate = nextDate;
+      if (elements.selectedDatePill) {
+        elements.selectedDatePill.textContent = formatDate(currentDate);
+      }
+      updatePotentialDuplicateNotice();
+      showScreen("details");
+      return;
+    case "screen-match":
+      if (getCurrentEvent() && ensureAuthenticatedSilently()) {
+        renderMatchScreen();
+        showScreen("match");
+      } else {
+        showScreen("date");
+      }
+      return;
+    case "screen-stats":
+      renderGlobalStats();
+      showScreen("stats");
+      return;
+    case "screen-friends-stats":
+      renderFriendsStats();
+      showScreen("friendsStats");
+      return;
+    case "screen-opponents-stats":
+      renderOpponentsStats();
+      showScreen("opponentsStats");
+      return;
+    case "screen-personal-stats":
+      if (ensureAuthenticatedSilently()) {
+        renderPersonalStatsPage();
+        showScreen("personalStats");
+      } else {
+        showScreen("start");
+      }
+      return;
+    case "screen-start":
+    default:
+      showScreen("start");
+  }
+}
+
+function syncNavigationHistory(mode = "push", screenId = getActiveScreenId()) {
+  if (isRestoringNavigationState || typeof window === "undefined" || !window.history) {
+    return;
+  }
+
+  if (mode === "push") {
+    navigationHistoryIndex += 1;
+    window.history.pushState({
+      ...createNavigationState(screenId),
+      historyIndex: navigationHistoryIndex
+    }, "");
+    return;
+  }
+
+  const existingState = window.history.state;
+  if (isManagedNavigationState(existingState) && Number.isInteger(existingState.historyIndex)) {
+    navigationHistoryIndex = existingState.historyIndex;
+  }
+
+  window.history.replaceState({
+    ...createNavigationState(screenId),
+    historyIndex: navigationHistoryIndex
+  }, "");
+}
+
+function initializeNavigationHistory() {
+  if (typeof window === "undefined" || !window.history) {
+    return;
+  }
+
+  const existingState = window.history.state;
+  if (isManagedNavigationState(existingState) && Number.isInteger(existingState.historyIndex)) {
+    navigationHistoryIndex = existingState.historyIndex;
+    return;
+  }
+
+  navigationHistoryIndex = 0;
+  syncNavigationHistory("replace");
+}
+
+function handleBrowserPopState(event) {
+  if (!isManagedNavigationState(event.state)) {
+    return;
+  }
+
+  navigationHistoryIndex = Number.isInteger(event.state.historyIndex) ? event.state.historyIndex : 0;
+  isRestoringNavigationState = true;
+  try {
+    applyNavigationState(event.state);
+  } finally {
+    isRestoringNavigationState = false;
+  }
+}
+
+function handleBackNavigation(fallbackScreenId = "screen-start") {
+  if (typeof window !== "undefined" && window.history && navigationHistoryIndex > 0) {
+    window.history.back();
+    return;
+  }
+
+  const fallbackState = {
+    ...createNavigationState(fallbackScreenId),
+    screenId: fallbackScreenId
+  };
+  applyNavigationState(fallbackState);
+  syncNavigationHistory("replace", fallbackScreenId);
 }
 
 function showScreen(name) {
@@ -2960,6 +3237,7 @@ function enterDetailsStep() {
   resetEventForm();
   updatePotentialDuplicateNotice();
   showScreen("details");
+  syncNavigationHistory("push", "screen-details");
 }
 
 function resetEventForm() {
@@ -2983,6 +3261,7 @@ function chooseExistingEvent(eventId) {
   elements.matchBackButton.dataset.back = currentMatchBack;
   renderMatchScreen();
   showScreen("match");
+  syncNavigationHistory("push", "screen-match");
 }
 
 function renderMatchScreen() {
@@ -3016,7 +3295,9 @@ function saveCurrentProfile() {
   const profile = getOrCreateEventProfile(currentEventId, activeUserId);
   profile.pod = elements.podSelect.value || "Pod 1";
   profile.deckColors = elements.deckColorSelect.value;
-  profile.archetype = elements.archetypeSelect.value ? [elements.archetypeSelect.value] : [];
+  profile.archetype = [...elements.archetypeSelect.selectedOptions]
+    .map(option => option.value)
+    .filter(Boolean);
   const currentEvent = getCurrentEvent();
   if (currentEvent) {
     persistEventRecord(currentEvent);
@@ -3338,6 +3619,7 @@ function openGlobalStats(backId) {
   elements.statsBackButton.dataset.back = backId;
   renderGlobalStats();
   showScreen("stats");
+  syncNavigationHistory("push", "screen-stats");
 }
 
 function openStats(backId) {
@@ -3352,6 +3634,7 @@ function openFriendsStats(backId) {
   elements.friendsStatsBackButton.dataset.back = backId;
   renderFriendsStats();
   showScreen("friendsStats");
+  syncNavigationHistory("push", "screen-friends-stats");
 }
 
 function openOpponentsStats(backId) {
@@ -3362,6 +3645,7 @@ function openOpponentsStats(backId) {
   elements.opponentsStatsBackButton.dataset.back = backId;
   renderOpponentsStats();
   showScreen("opponentsStats");
+  syncNavigationHistory("push", "screen-opponents-stats");
 }
 
 function openPersonalStats(backId) {
@@ -3386,6 +3670,7 @@ function openPersonalStatsForUser(userId, backId = "screen-start") {
   elements.personalStatsBackButton.dataset.back = backId;
   renderPersonalStatsPage();
   showScreen("personalStats");
+  syncNavigationHistory("push", "screen-personal-stats");
 }
 
 function openPersonalStatsForOpponent(name, backId = "screen-start") {
@@ -3402,6 +3687,7 @@ function openPersonalStatsForOpponent(name, backId = "screen-start") {
   elements.personalStatsBackButton.dataset.back = backId;
   renderPersonalStatsPage();
   showScreen("personalStats");
+  syncNavigationHistory("push", "screen-personal-stats");
 }
 
 function renderGlobalStats() {
@@ -4643,6 +4929,7 @@ function removePlayerFromEvent(eventId, userId) {
     currentEventId = null;
     closeRoundPrefillModal();
     showScreen("date");
+    syncNavigationHistory("replace", "screen-date");
   }
 
   renderActivityFeed();
