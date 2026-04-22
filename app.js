@@ -146,11 +146,13 @@ const TROPHY_RULES = [
   {
     id: "most_logged_matches",
     label: "Most logged matches",
+    description: () => "Currently holds the highest total match count among tracked players.",
     predicate: (context, summary) => context.totalMatches > 0 && context.totalMatches === summary.maxMatches
   },
   {
     id: "most_attended_events",
     label: "Most attended events",
+    description: () => "Currently holds the highest attended-event count among tracked players.",
     predicate: (context, summary) => context.totalEvents > 0 && context.totalEvents === summary.maxEvents
   }
 ];
@@ -159,51 +161,61 @@ const ACHIEVEMENT_RULES = [
   {
     id: "first_event",
     label: "First event",
+    description: () => "Log your first tracked event.",
     predicate: context => context.totalEvents >= 1
   },
   {
     id: "regular",
     label: "Regular",
+    description: () => "Attend 10 tracked events.",
     predicate: context => context.totalEvents >= 10
   },
   {
     id: "grinder",
     label: "Grinder",
+    description: () => "Log 50 matches.",
     predicate: context => context.totalMatches >= 50
   },
   {
     id: "archivist",
     label: "Archivist",
+    description: () => "Log 100 matches.",
     predicate: context => context.totalMatches >= 100
   },
   {
     id: "monocolor_mage",
     label: "Monocolor mage",
+    description: () => "Play all 5 mono-color decks at least once.",
     predicate: context => context.monoColorsPlayed.size >= 5
   },
   {
     id: "two_color_explorer",
     label: "Two-color explorer",
+    description: () => "Play all 10 two-color pairs.",
     predicate: context => context.colorPairsPlayed.size >= 10
   },
   {
     id: "archetype_collector",
     label: "Archetype collector",
+    description: () => "Play 10 different archetypes.",
     predicate: context => context.uniqueArchetypes.size >= 10
   },
   {
     id: "knows_the_field",
     label: "Knows the field",
+    description: () => "Play against every other tracked player.",
     predicate: context => context.allOtherTrackedUsers.size > 0 && context.trackedOpponentsFaced.size >= context.allOtherTrackedUsers.size
   },
   {
     id: "beat_the_field",
     label: "Beat the field",
+    description: () => "Record at least one win against every other tracked player.",
     predicate: context => context.allOtherTrackedUsers.size > 0 && context.trackedOpponentsBeaten.size >= context.allOtherTrackedUsers.size
   },
   {
     id: "fell_to_the_field",
     label: "Fell to the field",
+    description: () => "Record at least one loss against every other tracked player.",
     predicate: context => context.allOtherTrackedUsers.size > 0 && context.trackedOpponentsLostTo.size >= context.allOtherTrackedUsers.size
   }
 ];
@@ -313,6 +325,7 @@ let currentEventId = null;
 let currentMatchBack = "screen-date";
 let activeUserId = null;
 let viewedPersonalStatsSubject = null;
+let viewedEventParticipantSubject = null;
 let currentAuthUser = null;
 let authResolved = false;
 let authBusy = false;
@@ -340,7 +353,8 @@ const screens = {
   stats: document.getElementById("screen-stats"),
   friendsStats: document.getElementById("screen-friends-stats"),
   opponentsStats: document.getElementById("screen-opponents-stats"),
-  personalStats: document.getElementById("screen-personal-stats")
+  personalStats: document.getElementById("screen-personal-stats"),
+  eventPlayerStats: document.getElementById("screen-event-player-stats")
 };
 
 const elements = {
@@ -472,11 +486,16 @@ const elements = {
   statsPersonal: document.getElementById("stats-personal"),
   personalHeadToHead: document.getElementById("personal-head-to-head"),
   personalStatsBackButton: document.getElementById("personal-stats-back-button"),
+  eventPlayerStatsBackButton: document.getElementById("event-player-stats-back-button"),
   personalStatsTitle: document.getElementById("personal-stats-title"),
   personalStatsSubtitle: document.getElementById("personal-stats-subtitle"),
   personalStatsSnapshotHeading: document.getElementById("personal-stats-snapshot-heading"),
   personalStatsHeadToHeadHeading: document.getElementById("personal-stats-head-to-head-heading"),
-  personalStatsHistoryHeading: document.getElementById("personal-stats-history-heading")
+  personalStatsHistoryHeading: document.getElementById("personal-stats-history-heading"),
+  eventPlayerStatsTitle: document.getElementById("event-player-stats-title"),
+  eventPlayerStatsSubtitle: document.getElementById("event-player-stats-subtitle"),
+  eventPlayerStatsSummary: document.getElementById("event-player-stats-summary"),
+  eventPlayerStatsRounds: document.getElementById("event-player-stats-rounds")
 };
 
 async function init() {
@@ -1885,6 +1904,22 @@ function createNamedOpponentPersonalStatsSubject(name) {
   };
 }
 
+function createTrackedEventParticipantSubject(userId, eventId) {
+  return {
+    kind: "tracked",
+    userId: normalizeUserId(userId),
+    eventId: normalizeRecordId(eventId)
+  };
+}
+
+function createNamedEventParticipantSubject(name, eventId) {
+  return {
+    kind: "named",
+    name: String(name || "").trim(),
+    eventId: normalizeRecordId(eventId)
+  };
+}
+
 function getViewedPersonalStatsSubject() {
   if (viewedPersonalStatsSubject?.kind === "tracked") {
     const normalizedViewedUserId = normalizeUserId(viewedPersonalStatsSubject.userId);
@@ -1902,6 +1937,22 @@ function getViewedPersonalStatsSubject() {
 
   viewedPersonalStatsSubject = createTrackedPersonalStatsSubject(activeUserId);
   return viewedPersonalStatsSubject;
+}
+
+function cloneViewedEventParticipantSubject(subject) {
+  if (!subject || typeof subject !== "object" || !subject.eventId) {
+    return null;
+  }
+
+  if (subject.kind === "tracked") {
+    return createTrackedEventParticipantSubject(subject.userId, subject.eventId);
+  }
+
+  if (subject.kind === "named") {
+    return createNamedEventParticipantSubject(subject.name, subject.eventId);
+  }
+
+  return null;
 }
 
 function getFriendlyAuthError(error) {
@@ -1953,6 +2004,7 @@ async function handleAuthStateChange(user) {
   currentAuthUser = user;
   activeUserId = user ? normalizeUserId(user.uid) : null;
   viewedPersonalStatsSubject = createTrackedPersonalStatsSubject(activeUserId);
+  viewedEventParticipantSubject = null;
 
   if (!user) {
     needsNicknameSetup = false;
@@ -3282,10 +3334,12 @@ function createNavigationState(screenId = getActiveScreenId()) {
     currentMatchBack,
     currentSelectedRound,
     viewedPersonalStatsSubject: cloneViewedPersonalStatsSubject(viewedPersonalStatsSubject),
+    viewedEventParticipantSubject: cloneViewedEventParticipantSubject(viewedEventParticipantSubject),
     statsBackId: elements.statsBackButton?.dataset.back || "screen-start",
     friendsBackId: elements.friendsStatsBackButton?.dataset.back || "screen-start",
     opponentsBackId: elements.opponentsStatsBackButton?.dataset.back || "screen-start",
-    personalBackId: elements.personalStatsBackButton?.dataset.back || "screen-start"
+    personalBackId: elements.personalStatsBackButton?.dataset.back || "screen-start",
+    eventPlayerBackId: elements.eventPlayerStatsBackButton?.dataset.back || "screen-date"
   };
 }
 
@@ -3299,6 +3353,7 @@ function applyNavigationState(state) {
   currentMatchBack = nextState.currentMatchBack || "screen-date";
   currentSelectedRound = Number.isInteger(nextState.currentSelectedRound) ? nextState.currentSelectedRound : Number(nextState.currentSelectedRound) || 1;
   viewedPersonalStatsSubject = cloneViewedPersonalStatsSubject(nextState.viewedPersonalStatsSubject) || createTrackedPersonalStatsSubject(activeUserId);
+  viewedEventParticipantSubject = cloneViewedEventParticipantSubject(nextState.viewedEventParticipantSubject);
 
   if (elements.matchBackButton) {
     elements.matchBackButton.dataset.back = currentMatchBack;
@@ -3314,6 +3369,9 @@ function applyNavigationState(state) {
   }
   if (elements.personalStatsBackButton) {
     elements.personalStatsBackButton.dataset.back = nextState.personalBackId || "screen-start";
+  }
+  if (elements.eventPlayerStatsBackButton) {
+    elements.eventPlayerStatsBackButton.dataset.back = nextState.eventPlayerBackId || "screen-date";
   }
 
   switch (nextState.screenId) {
@@ -3354,6 +3412,14 @@ function applyNavigationState(state) {
         showScreen("personalStats");
       } else {
         showScreen("start");
+      }
+      return;
+    case "screen-event-player-stats":
+      if (ensureAuthenticatedSilently() && viewedEventParticipantSubject?.eventId) {
+        renderEventParticipantStatsPage();
+        showScreen("eventPlayerStats");
+      } else {
+        showScreen("date");
       }
       return;
     case "screen-start":
@@ -3545,7 +3611,7 @@ function renderDateEvents(date) {
       `;
 
     card.addEventListener("click", eventObject => {
-      if (eventObject.target.closest("[data-personal-stats-user], [data-personal-stats-opponent]")) {
+      if (eventObject.target.closest("[data-event-player-user], [data-event-player-opponent], [data-personal-stats-user], [data-personal-stats-opponent]")) {
         return;
       }
       chooseExistingEvent(event.id);
@@ -3768,21 +3834,21 @@ function renderEventParticipantsSummary(eventId) {
     <div class="event-participant-block">
       <div class="event-participant-label">Participants</div>
       <div class="event-participant-row">
-        ${participants.map(renderEventParticipantChip).join("")}
+        ${participants.map(participant => renderEventParticipantChip(participant, eventId)).join("")}
       </div>
     </div>
   `;
 }
 
-function renderEventParticipantChip(participant) {
+function renderEventParticipantChip(participant, eventId) {
   const isMock = participant.kind === "mock";
   const canOpenTrackedStats = participant.kind === "tracked" && participant.id;
   const canOpenOpponentStats = isMock && participant.name && normalize(participant.name) !== "npc opponent";
   const tagName = canOpenTrackedStats || canOpenOpponentStats ? "button type=\"button\"" : "span";
   const dataAttributes = canOpenTrackedStats
-    ? ` data-personal-stats-user="${escapeHtml(participant.id)}" data-personal-stats-back="screen-date"`
+    ? ` data-event-player-user="${escapeHtml(participant.id)}" data-event-player-event="${escapeHtml(eventId)}" data-event-player-back="screen-date"`
     : canOpenOpponentStats
-      ? ` data-personal-stats-opponent="${escapeHtml(participant.name)}" data-personal-stats-back="screen-date"`
+      ? ` data-event-player-opponent="${escapeHtml(participant.name)}" data-event-player-event="${escapeHtml(eventId)}" data-event-player-back="screen-date"`
       : "";
   return `
     <${tagName} class="event-participant-chip${isMock ? " is-mock" : ""}${canOpenTrackedStats || canOpenOpponentStats ? " is-clickable" : ""}"${dataAttributes}>
@@ -4042,6 +4108,122 @@ function openPersonalStatsForOpponent(name, backId = "screen-start") {
   syncNavigationHistory("push", "screen-personal-stats");
 }
 
+function openEventParticipantStatsForUser(userId, eventId, backId = "screen-date") {
+  if (!ensureAuthenticatedForApp()) {
+    return;
+  }
+
+  const normalizedUserId = normalizeUserId(userId);
+  const normalizedEventId = normalizeRecordId(eventId);
+  if (!normalizedUserId || !normalizedEventId) {
+    return;
+  }
+
+  viewedEventParticipantSubject = createTrackedEventParticipantSubject(normalizedUserId, normalizedEventId);
+  elements.eventPlayerStatsBackButton.dataset.back = backId;
+  renderEventParticipantStatsPage();
+  showScreen("eventPlayerStats");
+  syncNavigationHistory("push", "screen-event-player-stats");
+}
+
+function openEventParticipantStatsForOpponent(name, eventId, backId = "screen-date") {
+  if (!ensureAuthenticatedForApp()) {
+    return;
+  }
+
+  const normalizedName = String(name || "").trim();
+  const normalizedEventId = normalizeRecordId(eventId);
+  if (!normalizedName || !normalizedEventId) {
+    return;
+  }
+
+  viewedEventParticipantSubject = createNamedEventParticipantSubject(normalizedName, normalizedEventId);
+  elements.eventPlayerStatsBackButton.dataset.back = backId;
+  renderEventParticipantStatsPage();
+  showScreen("eventPlayerStats");
+  syncNavigationHistory("push", "screen-event-player-stats");
+}
+
+function renderEventParticipantStatsPage() {
+  const subject = cloneViewedEventParticipantSubject(viewedEventParticipantSubject);
+  const event = events.find(item => item.id === subject?.eventId);
+
+  if (!subject || !event) {
+    elements.eventPlayerStatsSummary.innerHTML = '<div class="empty-state">No event participant data available.</div>';
+    elements.eventPlayerStatsRounds.innerHTML = "";
+    return;
+  }
+
+  const eventLabel = `${formatDate(event.date)} - ${formatCompactEventLabel(event)}`;
+  if (subject.kind === "tracked") {
+    renderTrackedEventParticipantStats(subject.userId, event, eventLabel);
+    return;
+  }
+
+  renderNamedEventParticipantStats(subject.name, event, eventLabel);
+}
+
+function renderTrackedEventParticipantStats(userId, event, eventLabel) {
+  const entries = matchEntries
+    .filter(entry => entry.eventId === event.id && normalizeUserId(entry.userId) === normalizeUserId(userId))
+    .sort((left, right) => left.round - right.round);
+  const profile = eventProfiles.find(item => item.eventId === event.id && normalizeUserId(item.userId) === normalizeUserId(userId));
+  const stats = computeEntryStats(entries);
+  const playerName = getUserName(userId);
+
+  elements.eventPlayerStatsTitle.textContent = playerName;
+  elements.eventPlayerStatsSubtitle.textContent = eventLabel;
+  elements.eventPlayerStatsSummary.innerHTML = createListCard("Overall", `${stats.wins}-${stats.losses}-${stats.draws}`, [
+    `${profile?.pod || "Pod 1"}`,
+    `Deck: ${getDeckSummaryLabel(profile?.deckColors, profile?.splashColor, profile?.archetype)}`,
+    `Matches logged: ${stats.matches}`
+  ]);
+  elements.eventPlayerStatsRounds.innerHTML = renderTrackedEventRoundCards(entries) || '<div class="empty-state">No rounds logged yet for this player in this event.</div>';
+}
+
+function renderNamedEventParticipantStats(opponentName, event, eventLabel) {
+  const entries = getNamedOpponentEntries(opponentName)
+    .filter(entry => entry.eventId === event.id)
+    .sort((left, right) => left.round - right.round);
+  const stats = computeOpponentPerspectiveStats(entries);
+  const playersFaced = dedupeStrings(entries.map(entry => getUserName(entry.userId)).filter(name => name !== "Unknown player"));
+
+  elements.eventPlayerStatsTitle.textContent = opponentName;
+  elements.eventPlayerStatsSubtitle.textContent = eventLabel;
+  elements.eventPlayerStatsSummary.innerHTML = createListCard("Overall", `${stats.wins}-${stats.losses}-${stats.draws}`, [
+    `Players faced: ${playersFaced.join(", ") || "Unknown player"}`,
+    `Location: ${event.location || "Unknown location"}`,
+    `Matches logged: ${entries.length}`
+  ]);
+  elements.eventPlayerStatsRounds.innerHTML = renderNamedEventRoundCards(entries) || '<div class="empty-state">No rounds logged yet for this player in this event.</div>';
+}
+
+function renderTrackedEventRoundCards(entries) {
+  return entries.map(entry =>
+    createListCard(
+      `Round ${entry.round}`,
+      describeMatchResult(entry),
+      [
+        `Opponent: ${getOpponentDisplayName(entry)}`,
+        ...(entry.notes ? [`Notes: ${entry.notes}`] : [])
+      ]
+    )
+  ).join("");
+}
+
+function renderNamedEventRoundCards(entries) {
+  return entries.map(entry =>
+    createListCard(
+      `Round ${entry.round}`,
+      `${getMirroredScore(entry.score) || "0-0"} ${getResultVerb(getMirroredMatchResult(entry.result))}`,
+      [
+        `Opponent: ${getUserName(entry.userId)}`,
+        ...(entry.notes ? [`Notes: ${entry.notes}`] : [])
+      ]
+    )
+  ).join("");
+}
+
 function renderGlobalStats() {
   const activeUsersWithMatches = users.filter(user => matchEntries.some(entry => entry.userId === user.id));
   const eventIdsWithMatches = [...new Set(matchEntries.map(entry => entry.eventId))];
@@ -4181,7 +4363,6 @@ function renderDetailedPersonalStats(userId, personalEntries, canonicalFriendMat
   const friendOnly = computeEntryStats(personalEntries.filter(entry => entry.opponentKind === "tracked"));
   const matchupSummary = getPersonalMatchupSummary(canonicalFriendMatches, userId);
   const profileBreakdowns = getPersonalProfileBreakdowns(userId, personalEntries);
-  const statuses = getPlayerStatuses(userId);
   const trophies = getPlayerTrophies(userId);
   const achievements = getPlayerAchievements(userId);
 
@@ -4191,9 +4372,8 @@ function renderDetailedPersonalStats(userId, personalEntries, canonicalFriendMat
       `Game win rate: ${formatPercent(overall.gameWinRate)}`,
       `Friend-only win rate: ${formatPercent(friendOnly.matchWinRate)}`
     ])}
-    ${createListCard("Statuses", "", getProgressPanelRows(statuses, "No active status right now"))}
-    ${createListCard("Trophies", "", getProgressPanelRows(trophies, "No trophies right now"))}
-    ${createListCard("Achievements", "", getProgressPanelRows(achievements, "No achievements unlocked yet"))}
+    ${createProgressListCard("Trophies", trophies, "No trophies right now")}
+    ${createProgressListCard("Achievements", achievements, "No achievements unlocked yet")}
     ${renderPersonalMatchupSpotlights(matchupSummary)}
     ${createListCard("Matchup story", "", [
       `Most-played rival: ${matchupSummary.rival}`
@@ -5061,16 +5241,22 @@ function createStatTile(value, label) {
   return `<div class="stat-tile"><strong>${value}</strong><span>${label}</span></div>`;
 }
 
-function getProgressPanelRows(items, emptyRow) {
-  if (!items.length) {
-    return [emptyRow];
-  }
-
-  return items.map(item =>
-    item.descriptionText
-      ? `${item.label}: ${item.descriptionText}`
-      : item.label
-  );
+function createProgressListCard(title, items, emptyMessage) {
+  return `
+    <article class="list-card">
+      <div class="fw-bold">${escapeHtml(title)}</div>
+      <div class="match-meta">
+        ${items.length
+          ? items.map(item => {
+            const tooltip = item.descriptionText
+              ? `${item.label}: ${item.descriptionText}`
+              : item.label;
+            return `<span class="meta-pill progress-pill" title="${escapeHtml(tooltip)}">${escapeHtml(item.label)}</span>`;
+          }).join("")
+          : `<span class="meta-pill progress-pill is-empty">${escapeHtml(emptyMessage)}</span>`}
+      </div>
+    </article>
+  `;
 }
 
 function renderGlobalLeaderboardHeading(setCode) {
@@ -5228,8 +5414,19 @@ function removeMatch(matchId) {
 }
 
 function handlePlayerStatsNavigationClick(event) {
-  const trigger = event.target.closest("[data-personal-stats-user], [data-personal-stats-opponent]");
+  const trigger = event.target.closest("[data-event-player-user], [data-event-player-opponent], [data-personal-stats-user], [data-personal-stats-opponent]");
   if (!trigger) {
+    return;
+  }
+
+  const eventBackId = trigger.dataset.eventPlayerBack || "screen-date";
+  if (trigger.dataset.eventPlayerUser && trigger.dataset.eventPlayerEvent) {
+    openEventParticipantStatsForUser(trigger.dataset.eventPlayerUser, trigger.dataset.eventPlayerEvent, eventBackId);
+    return;
+  }
+
+  if (trigger.dataset.eventPlayerOpponent && trigger.dataset.eventPlayerEvent) {
+    openEventParticipantStatsForOpponent(trigger.dataset.eventPlayerOpponent, trigger.dataset.eventPlayerEvent, eventBackId);
     return;
   }
 

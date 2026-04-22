@@ -2068,6 +2068,14 @@ button.event-participant-chip {
   padding: 1rem 1.05rem;
 }
 
+.progress-pill {
+  cursor: help;
+}
+
+.progress-pill.is-empty {
+  cursor: default;
+}
+
 .matchup-spotlight-grid {
   display: grid;
   gap: 0.8rem;
