@@ -256,6 +256,7 @@ export async function loadPersistedState() {
         ...profile,
         eventId: normalizeRecordId(profile.eventId),
         userId: normalizeUserId(profile.userId),
+        splashColor: profile.splashColor || "",
         archetype: normalizeArchetypes(profile.archetype)
       }))
       .filter(profile => profile.userId),
@@ -387,6 +388,7 @@ export async function saveEventProfile(profile) {
       userId: normalizeUserId(profile.userId),
       pod: profile.pod,
       deckColors: profile.deckColors,
+      splashColor: profile.splashColor || "",
       archetype: normalizeArchetypes(profile.archetype)
     })
   );

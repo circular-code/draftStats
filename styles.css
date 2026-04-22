@@ -16,15 +16,23 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  background:
+    radial-gradient(circle at top left, rgba(255, 122, 24, 0.22), transparent 32%),
+    radial-gradient(circle at top right, rgba(66, 133, 244, 0.18), transparent 28%),
+    linear-gradient(180deg, var(--bg-top), var(--bg-bottom));
+}
+
+html {
+  overscroll-behavior-y: none;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
   font-family: "Space Grotesk", sans-serif;
   color: var(--text-main);
-  background:
-    radial-gradient(circle at top left, rgba(255, 122, 24, 0.22), transparent 32%),
-    radial-gradient(circle at top right, rgba(66, 133, 244, 0.18), transparent 28%),
-    linear-gradient(180deg, var(--bg-top), var(--bg-bottom));
 }
 
 .app-shell,
@@ -69,6 +77,67 @@ body {
   margin-top: 0;
 }
 
+.auth-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.auth-loading-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(6, 10, 18, 0.74);
+  backdrop-filter: blur(8px);
+}
+
+.auth-loading-panel {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 22rem);
+  padding: 1.35rem 1.25rem;
+  border-radius: 1.4rem;
+  background: rgba(17, 24, 39, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+  text-align: center;
+}
+
+.auth-loading-spinner {
+  width: 2.5rem;
+  height: 2.5rem;
+  margin: 0 auto 0.9rem;
+  border-radius: 999px;
+  border: 3px solid rgba(255, 255, 255, 0.16);
+  border-top-color: var(--accent);
+  animation: auth-spinner-spin 0.9s linear infinite;
+}
+
+.auth-loading-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.auth-loading-copy {
+  color: var(--text-muted);
+  font-size: 0.96rem;
+}
+
+body.auth-loading-open {
+  overflow: hidden;
+}
+
+@keyframes auth-spinner-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .account-menu-button {
   position: absolute;
   top: calc(var(--app-shell-top-padding) + 0.25rem);
@@ -103,6 +172,8 @@ body {
   border-radius: 999px;
   background: var(--player-avatar-ring, linear-gradient(135deg, rgba(255, 122, 24, 0.3), rgba(255, 255, 255, 0.08)));
   color: var(--player-avatar-text, #1a1410);
+  position: relative;
+  overflow: visible;
 }
 
 .account-menu-avatar-core {
@@ -132,6 +203,79 @@ body {
   border-radius: 999px;
   background: var(--player-avatar-ring, linear-gradient(135deg, rgba(255, 122, 24, 0.3), rgba(255, 255, 255, 0.08)));
   flex: 0 0 auto;
+  position: relative;
+  overflow: visible;
+}
+
+.player-avatar-shell.is-top-ranked::after,
+.account-menu-avatar.is-top-ranked::after {
+  content: "♛";
+  position: absolute;
+  top: -0.52rem;
+  right: -0.22rem;
+  font-size: 0.78rem;
+  line-height: 1;
+  color: #ffd86b;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+.player-avatar-shell.is-top-ranked::after,
+.account-menu-avatar.is-top-ranked::after {
+  content: "\265B";
+}
+
+.player-avatar-shell.is-top-ranked::after,
+.account-menu-avatar.is-top-ranked::after {
+  content: "";
+  top: -0.28rem;
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+  width: 0.86rem;
+  height: 0.56rem;
+  font-size: 0;
+  line-height: 0;
+  background: linear-gradient(180deg, #ffe08a 0%, #f6b93b 100%);
+  clip-path: polygon(0% 100%, 0% 48%, 18% 60%, 31% 0%, 50% 54%, 69% 0%, 82% 60%, 100% 48%, 100% 100%);
+  border-radius: 0.12rem 0.12rem 0.2rem 0.2rem;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.32);
+  color: transparent;
+  text-shadow: none;
+}
+
+.player-avatar-shell.has-status::before,
+.account-menu-avatar.has-status::before {
+  content: "";
+  position: absolute;
+  right: -0.14rem;
+  bottom: -0.1rem;
+  width: 0.78rem;
+  height: 0.78rem;
+  border: 2px solid rgba(12, 18, 30, 0.9);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 1px 4px rgba(0, 0, 0, 0.28);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.player-avatar-shell.is-status-hot::before,
+.account-menu-avatar.is-status-hot::before {
+  background: linear-gradient(135deg, #ffd54a, #ff4d2d);
+  border-radius: 999px;
+}
+
+.player-avatar-shell.is-status-cold::before,
+.account-menu-avatar.is-status-cold::before {
+  background: linear-gradient(135deg, #60a5fa, #c9f2ff);
+  border-radius: 999px;
+}
+
+.player-avatar-shell.is-status-active::before,
+.account-menu-avatar.is-status-active::before {
+  background: linear-gradient(135deg, #18c07a, #5be39f);
+  border-radius: 999px;
 }
 
 .player-avatar-core {
@@ -1791,6 +1935,18 @@ button.event-participant-chip {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+#friends-overview-grid {
+  grid-template-columns: 1fr;
+}
+
+#stats-overview-grid .stat-tile {
+  padding: 0.85rem 0.95rem;
+}
+
+#stats-overview-grid .stat-tile strong {
+  font-size: 1.3rem;
+}
+
 .stat-tile strong {
   display: block;
   font-size: 1.4rem;
@@ -1805,6 +1961,157 @@ button.event-participant-chip {
 
 .stats-section {
   margin-top: 1.4rem;
+}
+
+.stats-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.leaderboard-season-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.38rem 0.72rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.leaderboard-season-chip .set-symbol,
+.leaderboard-season-chip .set-symbol-fallback {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 1rem;
+}
+
+.leaderboard-season-code {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.rivalry-spotlight-tile {
+  grid-column: 1 / -1;
+  padding: 1rem 1.05rem;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.06)) padding-box,
+    linear-gradient(135deg, rgba(255, 122, 24, 0.95), rgba(255, 82, 82, 0.88), rgba(255, 170, 97, 0.92)) border-box;
+  border: 1px solid transparent;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 0 0 1px rgba(255, 122, 24, 0.08),
+    0 10px 24px rgba(255, 82, 82, 0.08);
+}
+
+.rivalry-spotlight-kicker {
+  margin-bottom: 0.35rem;
+  color: #ffd8bc;
+  font-weight: 800;
+}
+
+.rivalry-spotlight-title {
+  display: block;
+  font-size: 1.55rem;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  color: var(--text-main);
+  font-weight: 800;
+}
+
+.rivalry-spotlight-caption {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.rivalry-spotlight-layout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.rivalry-spotlight-copy {
+  min-width: 0;
+}
+
+.rivalry-spotlight-score {
+  flex: 0 0 auto;
+  color: #fff0df;
+  font-size: clamp(1.6rem, 4vw, 2.2rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  text-shadow: 0 2px 10px rgba(92, 18, 10, 0.22);
+}
+
+@media (max-width: 560px) {
+  .rivalry-spotlight-layout {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .rivalry-spotlight-score {
+    font-size: 1.55rem;
+  }
+}
+
+.opponent-summary-tile {
+  padding: 1rem 1.05rem;
+}
+
+.matchup-spotlight-grid {
+  display: grid;
+  gap: 0.8rem;
+  margin-bottom: 0.8rem;
+}
+
+.matchup-spotlight-card {
+  padding: 0.95rem 1rem;
+}
+
+.matchup-spotlight-kicker {
+  margin-bottom: 0.45rem;
+}
+
+.matchup-spotlight-title {
+  margin-bottom: 0.55rem;
+}
+
+.matchup-spotlight-title .activity-player-badge {
+  font-size: 1rem;
+}
+
+.matchup-spotlight-title .activity-player-avatar {
+  width: 1.9rem;
+  height: 1.9rem;
+}
+
+.matchup-spotlight-empty {
+  display: block;
+  color: var(--text-main);
+  font-size: 1.1rem;
+  line-height: 1.1;
+}
+
+@media (min-width: 720px) {
+  .matchup-spotlight-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 960px) {
+  #stats-overview-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .empty-state {
@@ -1856,5 +2163,11 @@ button.event-participant-chip {
 
   .shared-info-grid > :last-child {
     grid-column: auto;
+  }
+}
+
+@media (min-width: 960px) {
+  .shared-info-grid {
+    grid-template-columns: 70px minmax(0, 1.15fr) minmax(0, 0.8fr) minmax(0, 1fr);
   }
 }

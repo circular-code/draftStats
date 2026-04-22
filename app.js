@@ -90,8 +90,123 @@ let manaSymbolCatalog = {};
 const enhancedSelects = {
   set: null,
   deckColors: null,
+  splashColors: null,
   archetypes: null
 };
+
+const STATUS_RULES = [
+  {
+    id: "on_fire",
+    label: "On fire",
+    shortLabel: "W5",
+    tone: "hot",
+    priority: 100,
+    description: context => `${context.currentWinStreak} wins in a row`,
+    predicate: context => context.currentWinStreak >= 5
+  },
+  {
+    id: "slumping",
+    label: "Slumping",
+    shortLabel: "L5",
+    tone: "cold",
+    priority: 95,
+    description: context => `${context.currentLossStreak} losses in a row`,
+    predicate: context => context.currentLossStreak >= 5
+  },
+  {
+    id: "hot_streak",
+    label: "Hot streak",
+    shortLabel: "W3",
+    tone: "hot",
+    priority: 80,
+    description: context => `${context.currentWinStreak} wins in a row`,
+    predicate: context => context.currentWinStreak >= 3 && context.currentWinStreak < 5
+  },
+  {
+    id: "cold_streak",
+    label: "Cold streak",
+    shortLabel: "L3",
+    tone: "cold",
+    priority: 75,
+    description: context => `${context.currentLossStreak} losses in a row`,
+    predicate: context => context.currentLossStreak >= 3 && context.currentLossStreak < 5
+  },
+  {
+    id: "active",
+    label: "Active",
+    shortLabel: "A",
+    tone: "active",
+    priority: 40,
+    description: () => "Logged a match in the last 7 days",
+    predicate: context => context.lastMatchTimestamp > 0 && (Date.now() - context.lastMatchTimestamp) <= 7 * 24 * 60 * 60 * 1000
+  }
+];
+
+const TROPHY_RULES = [
+  {
+    id: "most_logged_matches",
+    label: "Most logged matches",
+    predicate: (context, summary) => context.totalMatches > 0 && context.totalMatches === summary.maxMatches
+  },
+  {
+    id: "most_attended_events",
+    label: "Most attended events",
+    predicate: (context, summary) => context.totalEvents > 0 && context.totalEvents === summary.maxEvents
+  }
+];
+
+const ACHIEVEMENT_RULES = [
+  {
+    id: "first_event",
+    label: "First event",
+    predicate: context => context.totalEvents >= 1
+  },
+  {
+    id: "regular",
+    label: "Regular",
+    predicate: context => context.totalEvents >= 10
+  },
+  {
+    id: "grinder",
+    label: "Grinder",
+    predicate: context => context.totalMatches >= 50
+  },
+  {
+    id: "archivist",
+    label: "Archivist",
+    predicate: context => context.totalMatches >= 100
+  },
+  {
+    id: "monocolor_mage",
+    label: "Monocolor mage",
+    predicate: context => context.monoColorsPlayed.size >= 5
+  },
+  {
+    id: "two_color_explorer",
+    label: "Two-color explorer",
+    predicate: context => context.colorPairsPlayed.size >= 10
+  },
+  {
+    id: "archetype_collector",
+    label: "Archetype collector",
+    predicate: context => context.uniqueArchetypes.size >= 10
+  },
+  {
+    id: "knows_the_field",
+    label: "Knows the field",
+    predicate: context => context.allOtherTrackedUsers.size > 0 && context.trackedOpponentsFaced.size >= context.allOtherTrackedUsers.size
+  },
+  {
+    id: "beat_the_field",
+    label: "Beat the field",
+    predicate: context => context.allOtherTrackedUsers.size > 0 && context.trackedOpponentsBeaten.size >= context.allOtherTrackedUsers.size
+  },
+  {
+    id: "fell_to_the_field",
+    label: "Fell to the field",
+    predicate: context => context.allOtherTrackedUsers.size > 0 && context.trackedOpponentsLostTo.size >= context.allOtherTrackedUsers.size
+  }
+];
 
 const manaSymbolFallbacks = {
   W: { label: "White mana", className: "white" },
@@ -242,6 +357,9 @@ const elements = {
   welcomeMessage: document.getElementById("welcome-message"),
   accountMenuButton: document.getElementById("account-menu-button"),
   accountMenuAvatar: document.getElementById("account-menu-avatar"),
+  authLoadingOverlay: document.getElementById("auth-loading-overlay"),
+  authLoadingTitle: document.getElementById("auth-loading-title"),
+  authLoadingCopy: document.getElementById("auth-loading-copy"),
   authModalShell: document.getElementById("auth-modal-shell"),
   authModalBackdrop: document.getElementById("auth-modal-backdrop"),
   authModalClose: document.getElementById("auth-modal-close"),
@@ -321,8 +439,9 @@ const elements = {
     matchBackButton: document.getElementById("match-back-button"),
     currentEventBanner: document.getElementById("current-event-banner"),
     matchRoundNav: document.getElementById("match-round-nav"),
-    podSelect: document.getElementById("pod-select"),
+  podSelect: document.getElementById("pod-select"),
   deckColorSelect: document.getElementById("deck-color-select"),
+  splashColorSelect: document.getElementById("splash-color-select"),
   archetypeSelect: document.getElementById("archetype-select"),
   matchAlert: document.getElementById("match-alert"),
   matchForm: document.getElementById("match-form"),
@@ -335,6 +454,7 @@ const elements = {
   statsBackButton: document.getElementById("stats-back-button"),
   statsSubtitle: document.getElementById("stats-subtitle"),
   statsOverviewGrid: document.getElementById("stats-overview-grid"),
+  statsLeaderboardHeading: document.getElementById("stats-leaderboard-heading"),
   statsLeaderboard: document.getElementById("stats-leaderboard"),
   statsAllPlayers: document.getElementById("stats-all-players"),
   statsAllOpponents: document.getElementById("stats-all-opponents"),
@@ -352,7 +472,6 @@ const elements = {
   statsPersonal: document.getElementById("stats-personal"),
   personalHeadToHead: document.getElementById("personal-head-to-head"),
   personalStatsBackButton: document.getElementById("personal-stats-back-button"),
-  personalStatsEyebrow: document.getElementById("personal-stats-eyebrow"),
   personalStatsTitle: document.getElementById("personal-stats-title"),
   personalStatsSubtitle: document.getElementById("personal-stats-subtitle"),
   personalStatsSnapshotHeading: document.getElementById("personal-stats-snapshot-heading"),
@@ -371,6 +490,7 @@ async function init() {
   populateSetSelect();
   populateLocationSelect();
   populateDeckColorSelect();
+  populateSplashColorSelect();
   populateArchetypeSelect();
   initializeEnhancedSelects();
   setDateInputToToday();
@@ -444,6 +564,7 @@ async function init() {
   elements.newOpponentInput.addEventListener("keydown", handleEnterToCreateOpponent);
   elements.podSelect.addEventListener("change", saveCurrentProfile);
   elements.deckColorSelect.addEventListener("change", saveCurrentProfile);
+  elements.splashColorSelect.addEventListener("change", saveCurrentProfile);
   elements.archetypeSelect.addEventListener("change", saveCurrentProfile);
   elements.matchForm.addEventListener("submit", event => event.preventDefault());
   elements.opponentSelect.addEventListener("change", handleOpponentSelectionChange);
@@ -911,6 +1032,7 @@ function persistDeletedMatchEntry(matchEntry) {
 function initializeEnhancedSelects() {
   initializeSetSelectEnhancer();
   initializeDeckColorSelectEnhancer();
+  initializeSplashColorSelectEnhancer();
   initializeArchetypeSelectEnhancer();
 }
 
@@ -1004,10 +1126,6 @@ function initializeDeckColorSelectEnhancer() {
         return `
           <div class="rich-option rich-option-colors">
             <div class="mana-symbol-stack">${renderManaSymbols(data.manaCode || data.value)}</div>
-            <div class="rich-option-copy">
-              <div class="rich-option-title">${escape(data.groupLabel || "")}</div>
-              <div class="rich-option-subtitle">${escape(data.label || data.text || "")}</div>
-            </div>
           </div>
         `;
       },
@@ -1019,7 +1137,6 @@ function initializeDeckColorSelectEnhancer() {
         return `
           <div class="rich-item rich-item-colors">
             <span class="mana-symbol-stack">${renderManaSymbols(data.manaCode || data.value)}</span>
-            <span class="rich-item-label">${escapeHtml(data.label || data.text || "")}</span>
           </div>
         `;
       }
@@ -1031,6 +1148,56 @@ function initializeDeckColorSelectEnhancer() {
   });
 
   enhancedSelects.deckColors.setValue(selectedValue || "", true);
+}
+
+function initializeSplashColorSelectEnhancer() {
+  if (typeof TomSelect === "undefined" || !elements.splashColorSelect) {
+    return;
+  }
+
+  const selectedValue = elements.splashColorSelect.value;
+  if (enhancedSelects.splashColors) {
+    enhancedSelects.splashColors.destroy();
+  }
+
+  enhancedSelects.splashColors = new TomSelect(elements.splashColorSelect, {
+    maxItems: 1,
+    allowEmptyOption: true,
+    create: false,
+    controlInput: null,
+    searchField: ["text", "label", "manaCode"],
+    dataAttr: "data-data",
+    render: {
+      option: (data, escape) => {
+        if (!data.value) {
+          return `<div>${escape(data.text || "None")}</div>`;
+        }
+
+        return `
+          <div class="rich-option rich-option-colors">
+            <div class="mana-symbol-stack">${renderManaSymbols(data.manaCode || data.value)}</div>
+          </div>
+        `;
+      },
+      item: data => {
+        if (!data.value) {
+          return `<div>None</div>`;
+        }
+
+        return `
+          <div class="rich-item rich-item-colors">
+            <span class="mana-symbol-stack">${renderManaSymbols(data.manaCode || data.value)}</span>
+          </div>
+        `;
+      }
+    },
+    onChange: value => {
+      elements.splashColorSelect.value = value;
+      saveCurrentProfile();
+    }
+  });
+
+  enhancedSelects.splashColors.setValue(selectedValue || "", true);
 }
 
 function initializeArchetypeSelectEnhancer() {
@@ -1251,10 +1418,135 @@ function getAvatarStyleAttribute(accentColor) {
   return `--player-avatar-fill:${appearance.fill}; --player-avatar-text:${appearance.text}; --player-avatar-ring:${appearance.ring};`;
 }
 
+function getConsecutiveResultCount(entries, result) {
+  let count = 0;
+  for (const entry of entries) {
+    if (entry.result !== result) {
+      break;
+    }
+    count += 1;
+  }
+  return count;
+}
+
+function buildPlayerProgressContext(userId) {
+  const normalizedUserId = normalizeUserId(userId);
+  const personalEntries = matchEntries
+    .filter(entry => normalizeUserId(entry.userId) === normalizedUserId)
+    .sort((left, right) => getMatchActivityTimestamp(right) - getMatchActivityTimestamp(left));
+  const profiles = eventProfiles.filter(profile => normalizeUserId(profile.userId) === normalizedUserId);
+  const trackedEntries = personalEntries.filter(entry => entry.opponentKind === "tracked" && entry.opponentUserId);
+  const totalMatches = personalEntries.length;
+  const totalEvents = new Set([
+    ...profiles.map(profile => profile.eventId),
+    ...personalEntries.map(entry => entry.eventId)
+  ].filter(Boolean)).size;
+  const deckColorsPlayed = new Set(profiles.map(profile => profile.deckColors).filter(Boolean));
+  const monoColorsPlayed = new Set([...deckColorsPlayed].filter(color => String(color).length === 1));
+  const colorPairsPlayed = new Set([...deckColorsPlayed].filter(color => String(color).length === 2));
+  const uniqueArchetypes = new Set(profiles.flatMap(profile => normalizeArchetypes(profile.archetype)));
+  const trackedOpponentsFaced = new Set(trackedEntries.map(entry => normalizeUserId(entry.opponentUserId)).filter(Boolean));
+  const trackedOpponentsBeaten = new Set(trackedEntries.filter(entry => entry.result === "win").map(entry => normalizeUserId(entry.opponentUserId)).filter(Boolean));
+  const trackedOpponentsLostTo = new Set(trackedEntries.filter(entry => entry.result === "loss").map(entry => normalizeUserId(entry.opponentUserId)).filter(Boolean));
+  const allOtherTrackedUsers = new Set(
+    users
+      .map(user => normalizeUserId(user.id))
+      .filter(otherUserId => otherUserId && otherUserId !== normalizedUserId)
+  );
+
+  return {
+    userId: normalizedUserId,
+    totalMatches,
+    totalEvents,
+    deckColorsPlayed,
+    monoColorsPlayed,
+    colorPairsPlayed,
+    uniqueArchetypes,
+    trackedOpponentsFaced,
+    trackedOpponentsBeaten,
+    trackedOpponentsLostTo,
+    allOtherTrackedUsers,
+    currentWinStreak: getConsecutiveResultCount(personalEntries, "win"),
+    currentLossStreak: getConsecutiveResultCount(personalEntries, "loss"),
+    lastMatchTimestamp: personalEntries.length ? getMatchActivityTimestamp(personalEntries[0]) : 0
+  };
+}
+
+function getAllPlayerProgressContexts() {
+  return users
+    .map(user => buildPlayerProgressContext(user.id))
+    .filter(context => context.userId);
+}
+
+function getPlayerTrophySummary(contexts = getAllPlayerProgressContexts()) {
+  return {
+    maxMatches: Math.max(0, ...contexts.map(context => context.totalMatches || 0)),
+    maxEvents: Math.max(0, ...contexts.map(context => context.totalEvents || 0))
+  };
+}
+
+function evaluateRuleSet(rules, context, summary = null) {
+  return rules
+    .filter(rule => rule.predicate(context, summary))
+    .map(rule => ({
+      ...rule,
+      descriptionText: typeof rule.description === "function" ? rule.description(context, summary) : rule.description || ""
+    }));
+}
+
+function getPlayerStatuses(userId) {
+  const context = buildPlayerProgressContext(userId);
+  return evaluateRuleSet(STATUS_RULES, context)
+    .sort((left, right) => right.priority - left.priority || left.label.localeCompare(right.label));
+}
+
+function getPrimaryPlayerStatus(userId) {
+  return getPlayerStatuses(userId)[0] || null;
+}
+
+function getPlayerTrophies(userId) {
+  const contexts = getAllPlayerProgressContexts();
+  const summary = getPlayerTrophySummary(contexts);
+  const context = contexts.find(item => item.userId === normalizeUserId(userId)) || buildPlayerProgressContext(userId);
+  return evaluateRuleSet(TROPHY_RULES, context, summary);
+}
+
+function getPlayerAchievements(userId) {
+  return evaluateRuleSet(ACHIEVEMENT_RULES, buildPlayerProgressContext(userId));
+}
+
+function getGlobalLeaderboardRows(activeUsersWithMatches = users.filter(user => matchEntries.some(entry => entry.userId === user.id))) {
+  return activeUsersWithMatches
+    .map(user => {
+      const allStats = computeEntryStats(matchEntries.filter(entry => entry.userId === user.id));
+      const friendStats = computeEntryStats(matchEntries.filter(entry => entry.userId === user.id && entry.opponentKind === "tracked"));
+      return { user, allStats, friendStats };
+    })
+    .sort((left, right) =>
+      right.allStats.matchWinRate - left.allStats.matchWinRate ||
+      right.allStats.matches - left.allStats.matches ||
+      right.friendStats.matchWinRate - left.friendStats.matchWinRate
+    );
+}
+
+function getTopRankedTrackedUserId() {
+  return getGlobalLeaderboardRows()[0]?.user?.id || "";
+}
+
+function isTopRankedTrackedUser(userId) {
+  return Boolean(userId && normalizeUserId(userId) === getTopRankedTrackedUserId());
+}
+
 function renderTrackedPlayerAvatar(name, userId, sizeClass) {
   const appearance = getUserAppearance(userId);
+  const topRankClass = isTopRankedTrackedUser(userId) ? " is-top-ranked" : "";
+  const status = getPrimaryPlayerStatus(userId);
+  const statusClass = status ? ` has-status is-status-${status.tone || "active"}` : "";
+  const statusAttributes = status
+    ? ` data-status-short="${escapeHtml(status.shortLabel)}" title="${escapeHtml(status.label)}"`
+    : "";
   return `
-    <span class="player-avatar-shell ${sizeClass}" style="${getAvatarStyleAttribute(appearance.accentColor)}" aria-hidden="true">
+    <span class="player-avatar-shell ${sizeClass}${topRankClass}${statusClass}" style="${getAvatarStyleAttribute(appearance.accentColor)}"${statusAttributes} aria-hidden="true">
       <span class="player-avatar-core">${escapeHtml(getParticipantMonogram(name))}</span>
     </span>
   `;
@@ -1385,6 +1677,7 @@ function renderAuthUi() {
   const canUseApp = Boolean(isSignedIn && hasUsableNickname());
   const displayName = hasUsableNickname() ? getActiveUserName() : "Nickname needed";
   const passwordEnabled = hasPasswordProvider();
+  const showAuthLoadingOverlay = !authResolved || (authBusy && !currentAuthUser);
 
   elements.authSignedOut?.classList.toggle("d-none", isSignedIn);
   elements.authPrimaryRow?.classList.toggle("d-none", isSignedIn);
@@ -1397,16 +1690,13 @@ function renderAuthUi() {
 
   if (elements.welcomeMessage) {
     if (isSignedIn) {
-      const appearance = getUserAppearance(activeUserId);
       const emailMarkup = currentAuthUser?.email
         ? `<div class="welcome-subtitle">${escapeHtml(currentAuthUser.email)}</div>`
         : "";
 
       elements.welcomeMessage.innerHTML = `
         <div class="welcome-avatar-wrap">
-          <span class="player-avatar-shell welcome-avatar" style="${getAvatarStyleAttribute(appearance.accentColor)}" aria-hidden="true">
-            <span class="player-avatar-core">${escapeHtml(getParticipantMonogram(displayName))}</span>
-          </span>
+          ${renderTrackedPlayerAvatar(displayName, activeUserId, "welcome-avatar")}
         </div>
         <div class="welcome-copy">
           <div class="welcome-kicker">Welcome back</div>
@@ -1474,6 +1764,27 @@ function renderAuthUi() {
   });
 
   setAuthControlsDisabled(authBusy);
+  renderAuthLoadingOverlay(showAuthLoadingOverlay);
+}
+
+function renderAuthLoadingOverlay(isVisible) {
+  if (!elements.authLoadingOverlay) {
+    return;
+  }
+
+  const isRestoringSession = !authResolved;
+  if (elements.authLoadingTitle) {
+    elements.authLoadingTitle.textContent = isRestoringSession ? "Restoring your session" : "Signing you in";
+  }
+  if (elements.authLoadingCopy) {
+    elements.authLoadingCopy.textContent = isRestoringSession
+      ? "Just a moment while we restore your login."
+      : "Just a moment while we sign you in.";
+  }
+
+  elements.authLoadingOverlay.classList.toggle("d-none", !isVisible);
+  elements.authLoadingOverlay.setAttribute("aria-hidden", isVisible ? "false" : "true");
+  document.body.classList.toggle("auth-loading-open", isVisible);
 }
 
 function hydratePendingProfileCustomizationFromActiveUser() {
@@ -1518,9 +1829,22 @@ function updateAccountMenuAvatar() {
 
   const appearance = getUserAppearance(activeUserId);
   const avatarAppearance = getAvatarAppearance(appearance.accentColor);
+  const status = getPrimaryPlayerStatus(activeUserId);
   elements.accountMenuAvatar.style.setProperty("--player-avatar-fill", avatarAppearance.fill);
   elements.accountMenuAvatar.style.setProperty("--player-avatar-text", avatarAppearance.text);
   elements.accountMenuAvatar.style.setProperty("--player-avatar-ring", avatarAppearance.ring);
+  elements.accountMenuAvatar.classList.toggle("is-top-ranked", isTopRankedTrackedUser(activeUserId));
+  elements.accountMenuAvatar.classList.toggle("has-status", Boolean(status));
+  elements.accountMenuAvatar.classList.toggle("is-status-hot", status?.tone === "hot");
+  elements.accountMenuAvatar.classList.toggle("is-status-cold", status?.tone === "cold");
+  elements.accountMenuAvatar.classList.toggle("is-status-active", status?.tone === "active");
+  if (status) {
+    elements.accountMenuAvatar.dataset.statusShort = status.shortLabel;
+    elements.accountMenuAvatar.title = status.label;
+  } else {
+    delete elements.accountMenuAvatar.dataset.statusShort;
+    elements.accountMenuAvatar.removeAttribute("title");
+  }
 }
 
 function refreshUserBoundUi() {
@@ -1624,10 +1948,11 @@ function upsertCurrentAuthProfile(profile) {
 }
 
 async function handleAuthStateChange(user) {
+  authResolved = false;
+  renderAuthUi();
   currentAuthUser = user;
   activeUserId = user ? normalizeUserId(user.uid) : null;
   viewedPersonalStatsSubject = createTrackedPersonalStatsSubject(activeUserId);
-  authResolved = true;
 
   if (!user) {
     needsNicknameSetup = false;
@@ -1637,6 +1962,7 @@ async function handleAuthStateChange(user) {
     closeRoundPrefillModal();
     showScreen("start");
     syncNavigationHistory("replace", "screen-start");
+    authResolved = true;
     refreshUserBoundUi();
     return;
   }
@@ -1658,6 +1984,7 @@ async function handleAuthStateChange(user) {
   }
 
   closeAuthModal();
+  authResolved = true;
   refreshUserBoundUi();
   if (needsNicknameSetup) {
     openAccountModal();
@@ -2011,6 +2338,7 @@ function mergeProfileRecords(targetProfile, sourceProfile) {
     ...targetProfile,
     pod: mergeProfileValues(targetProfile.pod, sourceProfile.pod, "Pod 1"),
     deckColors: mergeProfileValues(targetProfile.deckColors, sourceProfile.deckColors),
+    splashColor: mergeProfileValues(targetProfile.splashColor, sourceProfile.splashColor),
     archetype: mergeArchetypeValues(targetProfile.archetype, sourceProfile.archetype)
   };
 }
@@ -2465,6 +2793,7 @@ function attemptAutosaveCurrentRound(options = {}) {
     round,
     pod: profile.pod,
     deckColors: profile.deckColors,
+    splashColor: profile.splashColor,
     archetype: profile.archetype,
     opponentKind: opponent.kind,
     opponentUserId: opponent.userId,
@@ -2796,6 +3125,27 @@ function populateDeckColorSelect(selectedValue = "") {
 
   if (enhancedSelects.deckColors) {
     initializeDeckColorSelectEnhancer();
+  }
+}
+
+function populateSplashColorSelect(selectedValue = "") {
+  elements.splashColorSelect.innerHTML = '<option value="">None</option>';
+  const monoGroup = colorGroups.find(group => group.label === "Mono");
+  (monoGroup?.options || []).forEach(optionData => {
+    const option = document.createElement("option");
+    option.value = optionData.value;
+    option.textContent = optionData.label;
+    option.dataset.data = JSON.stringify({
+      label: optionData.label,
+      manaCode: optionData.value,
+      text: optionData.label
+    });
+    elements.splashColorSelect.appendChild(option);
+  });
+  elements.splashColorSelect.value = selectedValue || "";
+
+  if (enhancedSelects.splashColors) {
+    initializeSplashColorSelectEnhancer();
   }
 }
 
@@ -3278,6 +3628,7 @@ function renderMatchScreen() {
   }
   populatePodSelect(profile.pod);
   populateDeckColorSelect(profile.deckColors);
+  populateSplashColorSelect(profile.splashColor);
   populateArchetypeSelect(profile.archetype);
   populateOpponentSelect();
   selectBestNextRound();
@@ -3295,6 +3646,7 @@ function saveCurrentProfile() {
   const profile = getOrCreateEventProfile(currentEventId, activeUserId);
   profile.pod = elements.podSelect.value || "Pod 1";
   profile.deckColors = elements.deckColorSelect.value;
+  profile.splashColor = elements.splashColorSelect.value;
   profile.archetype = [...elements.archetypeSelect.selectedOptions]
     .map(option => option.value)
     .filter(Boolean);
@@ -3691,16 +4043,17 @@ function openPersonalStatsForOpponent(name, backId = "screen-start") {
 }
 
 function renderGlobalStats() {
-  const canonicalFriendMatches = buildCanonicalFriendMatches();
   const activeUsersWithMatches = users.filter(user => matchEntries.some(entry => entry.userId === user.id));
   const eventIdsWithMatches = [...new Set(matchEntries.map(entry => entry.eventId))];
   const mostPlayedSet = getMostPlayedSet();
 
-  elements.statsSubtitle.textContent = "All-time numbers for the whole group.";
+  elements.statsSubtitle.textContent = "Shared leaderboard, registered players, and opponent pool across all tracked matches.";
+  if (elements.statsLeaderboardHeading) {
+    elements.statsLeaderboardHeading.innerHTML = renderGlobalLeaderboardHeading(mostPlayedSet);
+  }
   elements.statsOverviewGrid.innerHTML = [
     createStatTile(matchEntries.length, "matches logged"),
     createStatTile(eventIdsWithMatches.length, "events with data"),
-    createStatTile(canonicalFriendMatches.length, "friend matchups"),
     createStatTile(mostPlayedSet || "-", "most played set")
   ].join("");
 
@@ -3714,17 +4067,10 @@ function renderStats() {
 
 function renderFriendsStats() {
   const canonicalFriendMatches = buildCanonicalFriendMatches();
-  const activeFriendIds = [...new Set(canonicalFriendMatches.flatMap(match => [match.playerAId, match.playerBId]))];
-  const rivalryCount = new Set(canonicalFriendMatches.map(match => `${match.playerAId}-${match.playerBId}`)).size;
   const topRivalry = getTopRivalrySummary(canonicalFriendMatches);
 
   elements.friendsStatsSubtitle.textContent = "Tracked-friend results, rivalries, and in-group standings.";
-  elements.friendsOverviewGrid.innerHTML = [
-    createStatTile(canonicalFriendMatches.length, "friend matchups"),
-    createStatTile(activeFriendIds.length, "active friends"),
-    createStatTile(rivalryCount, "rivalries logged"),
-    createStatTile(topRivalry.label || "-", `top rivalry${topRivalry.score ? ` ${topRivalry.score}` : ""}`)
-  ].join("");
+  elements.friendsOverviewGrid.innerHTML = renderTopRivalrySpotlight(topRivalry);
 
   renderFriendsLeaderboardStats(canonicalFriendMatches);
   renderRivalryStats(canonicalFriendMatches, elements.friendsRivalries);
@@ -3732,15 +4078,16 @@ function renderFriendsStats() {
 
 function renderOpponentsStats() {
   const namedOpponentRows = getNamedOpponentLeaderboardRows();
+  const mostDangerousOpponent = namedOpponentRows[0] || null;
   const mostPlayedOpponent = [...namedOpponentRows]
-    .sort((left, right) => right.matches - left.matches || left.name.localeCompare(right.name))[0]?.name || "-";
+    .sort((left, right) => right.matches - left.matches || left.name.localeCompare(right.name))[0]?.name || "";
 
-  elements.opponentsStatsSubtitle.textContent = "Unregistered opponent matchups across the group.";
+  if (elements.opponentsStatsSubtitle) {
+    elements.opponentsStatsSubtitle.textContent = "";
+  }
   elements.opponentsOverviewGrid.innerHTML = [
-    createStatTile(namedOpponentRows.length, "named opponents"),
-    createStatTile(namedOpponentRows.reduce((total, row) => total + row.matches, 0), "matches logged"),
-    createStatTile(new Set(namedOpponentRows.flatMap(row => row.entries.map(entry => entry.eventId))).size, "events represented"),
-    createStatTile(mostPlayedOpponent, "most played opponent")
+    renderOpponentSummaryTile(mostDangerousOpponent?.name || "No opponent logged yet", "most dangerous opponent"),
+    renderOpponentSummaryTile(mostPlayedOpponent || "No opponent logged yet", "most played opponent")
   ].join("");
 
   renderOpponentsLeaderboardStats(namedOpponentRows);
@@ -3760,9 +4107,6 @@ function renderPersonalStatsPage() {
   const isOwnStats = userId === activeUserId;
   const playerName = getUserName(userId);
 
-  if (elements.personalStatsEyebrow) {
-    elements.personalStatsEyebrow.textContent = isOwnStats ? "Personal" : "Player";
-  }
   if (elements.personalStatsTitle) {
     elements.personalStatsTitle.textContent = isOwnStats ? "Your stats" : playerName;
   }
@@ -3837,6 +4181,9 @@ function renderDetailedPersonalStats(userId, personalEntries, canonicalFriendMat
   const friendOnly = computeEntryStats(personalEntries.filter(entry => entry.opponentKind === "tracked"));
   const matchupSummary = getPersonalMatchupSummary(canonicalFriendMatches, userId);
   const profileBreakdowns = getPersonalProfileBreakdowns(userId, personalEntries);
+  const statuses = getPlayerStatuses(userId);
+  const trophies = getPlayerTrophies(userId);
+  const achievements = getPlayerAchievements(userId);
 
   targetElement.innerHTML = `
     ${createListCard("Overall", "", [
@@ -3844,9 +4191,11 @@ function renderDetailedPersonalStats(userId, personalEntries, canonicalFriendMat
       `Game win rate: ${formatPercent(overall.gameWinRate)}`,
       `Friend-only win rate: ${formatPercent(friendOnly.matchWinRate)}`
     ])}
+    ${createListCard("Statuses", "", getProgressPanelRows(statuses, "No active status right now"))}
+    ${createListCard("Trophies", "", getProgressPanelRows(trophies, "No trophies right now"))}
+    ${createListCard("Achievements", "", getProgressPanelRows(achievements, "No achievements unlocked yet"))}
+    ${renderPersonalMatchupSpotlights(matchupSummary)}
     ${createListCard("Matchup story", "", [
-      `Nemesis: ${matchupSummary.nemesis}`,
-      `Best matchup: ${matchupSummary.bestMatchup}`,
       `Most-played rival: ${matchupSummary.rival}`
     ])}
     ${createListCard("Color combinations", "", profileBreakdowns.colors.rows)}
@@ -3857,9 +4206,6 @@ function renderDetailedPersonalStats(userId, personalEntries, canonicalFriendMat
 function renderNamedOpponentStatsPage(opponentName) {
   const opponentEntries = getNamedOpponentEntries(opponentName);
 
-  if (elements.personalStatsEyebrow) {
-    elements.personalStatsEyebrow.textContent = "Opponent";
-  }
   if (elements.personalStatsTitle) {
     elements.personalStatsTitle.textContent = opponentName;
   }
@@ -3887,17 +4233,7 @@ function renderGlobalLeaderboardStats(activeUsersWithMatches) {
     return;
   }
 
-  const rows = activeUsersWithMatches
-    .map(user => {
-      const allStats = computeEntryStats(matchEntries.filter(entry => entry.userId === user.id));
-      const friendStats = computeEntryStats(matchEntries.filter(entry => entry.userId === user.id && entry.opponentKind === "tracked"));
-      return { user, allStats, friendStats };
-    })
-      .sort((left, right) =>
-        right.allStats.matchWinRate - left.allStats.matchWinRate ||
-        right.allStats.matches - left.allStats.matches ||
-        right.friendStats.matchWinRate - left.friendStats.matchWinRate
-      );
+  const rows = getGlobalLeaderboardRows(activeUsersWithMatches);
 
   elements.statsLeaderboard.innerHTML = rows.map(({ user, allStats, friendStats }, index) =>
     createListCard(
@@ -4185,7 +4521,7 @@ function renderPersonalHistoryToTarget(userId, personalEntries, targetElement) {
           `${stats.wins}-${stats.losses}-${stats.draws}`,
       [
         `${profile?.pod || "Pod 1"}`,
-        `Deck: ${getDeckSummaryLabel(profile?.deckColors, profile?.archetype)}`,
+        `Deck: ${getDeckSummaryLabel(profile?.deckColors, profile?.splashColor, profile?.archetype)}`,
         `Matches logged: ${stats.matches}`
       ]
     )
@@ -4387,7 +4723,9 @@ function getPersonalMatchupSummary(canonicalFriendMatches, userId) {
       subtitle: "No tracked friend matchups yet",
       nemesis: "Not enough data",
       bestMatchup: "Not enough data",
-      rival: "Not enough data"
+      rival: "Not enough data",
+      nemesisRow: null,
+      bestMatchupRow: null
     };
   }
 
@@ -4412,8 +4750,41 @@ function getPersonalMatchupSummary(canonicalFriendMatches, userId) {
     subtitle: `${matchupRows.length} tracked friend matchup${matchupRows.length === 1 ? "" : "s"} logged`,
     nemesis: `${getUserName(nemesis.opponentId)} (${nemesis.wins}-${nemesis.losses}-${nemesis.draws})`,
     bestMatchup: `${getUserName(bestMatchup.opponentId)} (${bestMatchup.wins}-${bestMatchup.losses}-${bestMatchup.draws})`,
-    rival: `${getUserName(rival.opponentId)} (${rival.meetings} game${rival.meetings === 1 ? "" : "s"})`
+    rival: `${getUserName(rival.opponentId)} (${rival.meetings} game${rival.meetings === 1 ? "" : "s"})`,
+    nemesisRow: nemesis,
+    bestMatchupRow: bestMatchup
   };
+}
+
+function renderPersonalMatchupSpotlights(matchupSummary) {
+  return `
+    <div class="matchup-spotlight-grid">
+      ${createPersonalMatchupSpotlightCard("Your nemesis", matchupSummary.nemesisRow, "screen-personal-stats")}
+      ${createPersonalMatchupSpotlightCard("Your easy win", matchupSummary.bestMatchupRow, "screen-personal-stats")}
+    </div>
+  `;
+}
+
+function createPersonalMatchupSpotlightCard(label, row, backId) {
+  if (!row) {
+    return `
+      <article class="list-card matchup-spotlight-card">
+        <div class="eyebrow matchup-spotlight-kicker">${escapeHtml(label)}</div>
+        <strong class="matchup-spotlight-empty">Not enough data</strong>
+      </article>
+    `;
+  }
+
+  return `
+    <article class="list-card matchup-spotlight-card">
+      <div class="eyebrow matchup-spotlight-kicker">${escapeHtml(label)}</div>
+      <div class="matchup-spotlight-title">${renderTrackedPlayerCardTitle(row.opponentId, backId)}</div>
+      <div class="match-meta">
+        <span class="meta-pill">${escapeHtml(`${row.wins}-${row.losses}-${row.draws}`)}</span>
+        <span class="meta-pill">${escapeHtml(`${formatPercent(row.matchWinRate)} win rate`)}</span>
+      </div>
+    </article>
+  `;
 }
 
 function getNamedOpponentEntries(opponentName) {
@@ -4688,6 +5059,66 @@ function renderNamedOpponentHistory(opponentName, opponentEntries, targetElement
 
 function createStatTile(value, label) {
   return `<div class="stat-tile"><strong>${value}</strong><span>${label}</span></div>`;
+}
+
+function getProgressPanelRows(items, emptyRow) {
+  if (!items.length) {
+    return [emptyRow];
+  }
+
+  return items.map(item =>
+    item.descriptionText
+      ? `${item.label}: ${item.descriptionText}`
+      : item.label
+  );
+}
+
+function renderGlobalLeaderboardHeading(setCode) {
+  const set = setCode ? getSet(setCode) : null;
+  const seasonLabel = set?.name ? `${set.name} Season` : "";
+
+  return `
+    <h3 class="small-heading mb-0">Global leaderboard</h3>
+    ${seasonLabel ? `
+      <div class="leaderboard-season-chip">
+        ${set?.iconSvgUri ? renderSetIcon(set) : `<span class="leaderboard-season-code">${escapeHtml(setCode)}</span>`}
+        <span>${escapeHtml(seasonLabel)}</span>
+      </div>
+    ` : ""}
+  `;
+}
+
+function renderTopRivalrySpotlight(topRivalry) {
+  if (!topRivalry?.label) {
+    return `
+      <article class="stat-tile rivalry-spotlight-tile">
+        <div class="eyebrow rivalry-spotlight-kicker">Top rivalry</div>
+        <strong class="rivalry-spotlight-title">No rivalry logged yet</strong>
+        <span class="rivalry-spotlight-caption">Start logging friend matchups to build the first rivalry.</span>
+      </article>
+    `;
+  }
+
+  return `
+    <article class="stat-tile rivalry-spotlight-tile">
+      <div class="rivalry-spotlight-layout">
+        <div class="rivalry-spotlight-copy">
+          <div class="eyebrow rivalry-spotlight-kicker">Top rivalry</div>
+          <strong class="rivalry-spotlight-title">${escapeHtml(topRivalry.label)}</strong>
+        </div>
+        ${topRivalry.score ? `<div class="rivalry-spotlight-score">${escapeHtml(topRivalry.score)}</div>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function renderOpponentSummaryTile(value, label) {
+  return `
+    <article class="stat-tile opponent-summary-tile">
+      <strong>${escapeHtml(value)}</strong>
+      <span>${escapeHtml(label)}</span>
+    </article>
+  `;
 }
 
 function createListCard(title, subtitle, rows, options = {}) {
@@ -5010,6 +5441,7 @@ function getOrCreateEventProfile(eventId, userId) {
       userId,
       pod: "Pod 1",
       deckColors: "",
+      splashColor: "",
       archetype: []
     };
     eventProfiles.push(profile);
@@ -5189,8 +5621,11 @@ function getArchetypeLabel(value) {
   return archetypes.length ? archetypes.join(", ") : "No archetype";
 }
 
-function getDeckSummaryLabel(deckColors, archetype) {
+function getDeckSummaryLabel(deckColors, splashColor, archetype) {
   const parts = [renderDeckColorSummary(deckColors)];
+  if (splashColor) {
+    parts.push(`Splash ${renderDeckColorSummary(splashColor)}`);
+  }
   const archetypeLabel = normalizeArchetypes(archetype).join(", ");
   if (archetypeLabel) {
     parts.push(escapeHtml(archetypeLabel));

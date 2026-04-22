@@ -268,6 +268,10 @@
                 <select class="form-select" id="deck-color-select"></select>
               </div>
               <div>
+                <label class="form-label" for="splash-color-select">Splash</label>
+                <select class="form-select" id="splash-color-select"></select>
+              </div>
+              <div>
                 <label class="form-label" for="archetype-select">Archetype</label>
                 <div class="select-wrap no-caret">
                   <select class="form-select" id="archetype-select" aria-describedby="archetype-select-hint" multiple></select>
@@ -364,14 +368,15 @@
               <button class="btn btn-outline-light btn-sm stats-nav-button" data-stats-view="personal" type="button">Personal</button>
             </div>
 
-            <p class="eyebrow mb-2">Global</p>
-            <h2 class="section-title mb-2">Group stats</h2>
-            <p class="text-secondary mb-4" id="stats-subtitle">All-time numbers for the whole group.</p>
+            <h2 class="section-title mb-2">Global stats</h2>
+            <p class="text-secondary mb-4" id="stats-subtitle">Shared leaderboard, registered players, and opponent pool across all tracked matches.</p>
 
             <div class="stats-grid mb-4" id="stats-overview-grid"></div>
 
             <div class="stats-section">
-              <h3 class="small-heading mb-3">Global leaderboard</h3>
+              <div class="stats-section-heading mb-3" id="stats-leaderboard-heading">
+                <h3 class="small-heading mb-0">Global leaderboard</h3>
+              </div>
               <div class="list-stack" id="stats-leaderboard"></div>
             </div>
 
@@ -433,9 +438,7 @@
               <button class="btn btn-outline-light btn-sm stats-nav-button" data-stats-view="personal" type="button">Personal</button>
             </div>
 
-            <p class="eyebrow mb-2">Opponents</p>
             <h2 class="section-title mb-2">Opponent stats</h2>
-            <p class="text-secondary mb-4" id="opponents-stats-subtitle">Unregistered opponent matchups across the group.</p>
 
             <div class="stats-grid mb-4" id="opponents-overview-grid"></div>
 
@@ -460,7 +463,6 @@
               <button class="btn btn-outline-light btn-sm stats-nav-button is-active" data-stats-view="personal" type="button">Personal</button>
             </div>
 
-            <p class="eyebrow mb-2" id="personal-stats-eyebrow">Personal</p>
             <h2 class="section-title mb-2" id="personal-stats-title">Your stats</h2>
             <p class="text-secondary mb-4" id="personal-stats-subtitle">Stats for your nickname.</p>
 
@@ -482,6 +484,15 @@
       </div>
     </section>
   </main>
+
+  <div class="auth-loading-overlay d-none" id="auth-loading-overlay" aria-hidden="true">
+    <div class="auth-loading-backdrop"></div>
+    <div class="auth-loading-panel" role="status" aria-live="polite" aria-atomic="true">
+      <div class="auth-loading-spinner" aria-hidden="true"></div>
+      <h2 class="auth-loading-title" id="auth-loading-title">Restoring your session</h2>
+      <p class="auth-loading-copy mb-0" id="auth-loading-copy">Just a moment while we sign you in.</p>
+    </div>
+  </div>
 
   <div class="account-modal-shell d-none" id="auth-modal-shell" aria-hidden="true">
     <div class="account-modal-backdrop" id="auth-modal-backdrop"></div>
