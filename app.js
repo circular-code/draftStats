@@ -369,6 +369,7 @@ const elements = {
   primaryRegisterButton: document.getElementById("primary-register-button"),
   primaryLoginButton: document.getElementById("primary-login-button"),
   welcomeMessage: document.getElementById("welcome-message"),
+  homeNavButton: document.getElementById("home-nav-button"),
   accountMenuButton: document.getElementById("account-menu-button"),
   accountMenuAvatar: document.getElementById("account-menu-avatar"),
   authLoadingOverlay: document.getElementById("auth-loading-overlay"),
@@ -543,6 +544,7 @@ async function init() {
   elements.primaryLoginButton?.addEventListener("click", () => openAuthModal("login"));
   elements.authModalClose?.addEventListener("click", closeAuthModal);
   elements.authModalBackdrop?.addEventListener("click", closeAuthModal);
+  elements.homeNavButton?.addEventListener("click", handleHomeNavigation);
   elements.accountMenuButton?.addEventListener("click", openAccountModal);
   elements.accountModalClose?.addEventListener("click", closeAccountModal);
   elements.accountModalBackdrop?.addEventListener("click", closeAccountModal);
@@ -599,6 +601,7 @@ async function init() {
   elements.opponentsLeaderboard?.addEventListener("click", handlePlayerStatsNavigationClick);
   elements.personalHeadToHead?.addEventListener("click", handlePlayerStatsNavigationClick);
   elements.friendsRivalries?.addEventListener("click", handlePlayerStatsNavigationClick);
+  elements.statsHistory?.addEventListener("click", handlePlayerStatsNavigationClick);
 
   elements.locationSelect.addEventListener("input", updatePotentialDuplicateNotice);
 
@@ -1335,6 +1338,25 @@ function renderDeckColorSummary(value) {
       <span>${escapeHtml(getDeckColorLabel(value))}</span>
     </span>
   `;
+}
+
+function getDeckColorCombinationKey(deckColors, splashColor = "") {
+  const main = String(deckColors || "").trim();
+  const splash = String(splashColor || "").trim();
+  return `${main}::${splash}`;
+}
+
+function parseDeckColorCombinationKey(value) {
+  const [deckColors = "", splashColor = ""] = String(value || "").split("::");
+  return {
+    deckColors,
+    splashColor
+  };
+}
+
+function renderDeckColorCombinationSummary(value) {
+  const { deckColors, splashColor } = parseDeckColorCombinationKey(value);
+  return getDeckSummaryLabel(deckColors, splashColor, "");
 }
 
 function setAuthControlsDisabled(isDisabled) {
@@ -3496,6 +3518,19 @@ function handleBackNavigation(fallbackScreenId = "screen-start") {
   syncNavigationHistory("replace", fallbackScreenId);
 }
 
+function handleHomeNavigation() {
+  showScreen("start");
+  syncNavigationHistory("push", "screen-start");
+}
+
+function updateHomeNavVisibility() {
+  if (!elements.homeNavButton) {
+    return;
+  }
+
+  elements.homeNavButton.classList.toggle("d-none", getActiveScreenId() === "screen-start");
+}
+
 function showScreen(name) {
   Object.values(screens).forEach(screen => screen.classList.remove("active"));
   screens[name].classList.add("active");
@@ -3503,6 +3538,7 @@ function showScreen(name) {
     closeRoundPrefillModal();
   }
   updateAdminUiState();
+  updateHomeNavVisibility();
 }
 
 function showScreenById(id) {
@@ -3512,6 +3548,7 @@ function showScreenById(id) {
     closeRoundPrefillModal();
   }
   updateAdminUiState();
+  updateHomeNavVisibility();
 }
 
 function syncDateView(date) {
@@ -4344,7 +4381,8 @@ function renderActivityFeed() {
       reporterName,
       opponentUserId: entry.opponentKind === "tracked" ? entry.opponentUserId : null,
       opponentName,
-      opponentKind: entry.opponentKind
+      opponentKind: entry.opponentKind,
+      eventId: entry.eventId
     }, subtitleParts.join(" - "), [
       describeMatchResult(entry),
       event ? formatDate(event.date) : "Unknown date",
@@ -4703,7 +4741,11 @@ function renderPersonalHistoryToTarget(userId, personalEntries, targetElement) {
         `${profile?.pod || "Pod 1"}`,
         `Deck: ${getDeckSummaryLabel(profile?.deckColors, profile?.splashColor, profile?.archetype)}`,
         `Matches logged: ${stats.matches}`
-      ]
+      ],
+      {
+        className: "is-clickable",
+        dataAttributes: ` data-event-player-user="${escapeHtml(userId)}" data-event-player-event="${escapeHtml(event.id)}" data-event-player-back="screen-personal-stats"`
+      }
     )
   ).join("");
 }
@@ -4776,10 +4818,11 @@ function getPersonalProfileBreakdowns(userId, personalEntries) {
     const profileEntries = entriesByEventId.get(profile.eventId) || [];
 
     if (profile.deckColors) {
-      const colorRecord = colorCounts.get(profile.deckColors) || { count: 0, entries: [] };
+      const colorKey = getDeckColorCombinationKey(profile.deckColors, profile.splashColor);
+      const colorRecord = colorCounts.get(colorKey) || { count: 0, entries: [] };
       colorRecord.count += 1;
       colorRecord.entries.push(...profileEntries);
-      colorCounts.set(profile.deckColors, colorRecord);
+      colorCounts.set(colorKey, colorRecord);
     }
 
     normalizeArchetypes(profile.archetype).forEach(archetype => {
@@ -4795,7 +4838,7 @@ function getPersonalProfileBreakdowns(userId, personalEntries) {
       colorCounts,
       "No color combinations logged yet",
       "No event profiles with deck colors yet",
-      value => renderDeckColorSummary(value)
+      value => renderDeckColorCombinationSummary(value)
     ),
     archetypes: createProfileBreakdownSummary(
       archetypeCounts,
@@ -4812,7 +4855,12 @@ function createProfileBreakdownSummary(counts, emptySubtitle, emptyRow, renderLa
       const stats = computeEntryStats(record.entries);
       const eventLabel = `${record.count} event${record.count === 1 ? "" : "s"}`;
       const winRateLabel = stats.matches ? `${formatPercent(stats.matchWinRate)} WR` : "No matches";
-      return `${renderLabel(label)}: ${eventLabel} - ${winRateLabel}`;
+      return `
+        <span class="profile-breakdown-row">
+          <span class="profile-breakdown-label">${renderLabel(label)}</span>
+          <span class="profile-breakdown-stats">${escapeHtml(eventLabel)} · ${escapeHtml(winRateLabel)}</span>
+        </span>
+      `;
     });
 
   return {
@@ -5232,7 +5280,11 @@ function renderNamedOpponentHistory(opponentName, opponentEntries, targetElement
         `Players faced: ${playersFaced.join(", ") || "Unknown player"}`,
         `Location: ${event.location || "Unknown location"}`,
         `Matches logged: ${entries.length}`
-      ]
+      ],
+      {
+        className: "is-clickable",
+        dataAttributes: ` data-event-player-opponent="${escapeHtml(opponentName)}" data-event-player-event="${escapeHtml(event.id)}" data-event-player-back="screen-personal-stats"`
+      }
     )
   ).join("");
 }
@@ -5309,8 +5361,10 @@ function renderOpponentSummaryTile(value, label) {
 
 function createListCard(title, subtitle, rows, options = {}) {
   const titleMarkup = options.titleHtml || `<div class="fw-bold">${title}</div>`;
+  const className = options.className ? ` ${options.className}` : "";
+  const dataAttributes = options.dataAttributes || "";
   return `
-    <article class="list-card">
+    <article class="list-card${className}"${dataAttributes}>
       ${titleMarkup}
       ${subtitle ? `<div class="small text-secondary mt-1">${subtitle}</div>` : ""}
       <div class="match-meta">
@@ -5357,9 +5411,13 @@ function createActivityCard(players, subtitle, rows, backId = "screen-start") {
   const reporterName = players?.reporterName || "Unknown player";
   const opponentName = players?.opponentName || "Unknown player";
   const opponentState = getActivityOpponentAvatarState(players?.opponentKind, opponentName);
+  const eventId = normalizeRecordId(players?.eventId);
+  const articleDataAttributes = players?.reporterId && eventId
+    ? ` data-event-player-user="${escapeHtml(players.reporterId)}" data-event-player-event="${escapeHtml(eventId)}" data-event-player-back="${escapeHtml(backId)}"`
+    : "";
 
   return `
-    <article class="list-card activity-card">
+    <article class="list-card activity-card${articleDataAttributes ? " is-clickable" : ""}"${articleDataAttributes}>
       <div class="activity-player-row">
         ${renderActivityPlayerBadge(reporterName, "tracked", players?.reporterId, backId)}
         <span class="activity-player-versus">vs</span>
@@ -5819,10 +5877,11 @@ function getArchetypeLabel(value) {
 }
 
 function getDeckSummaryLabel(deckColors, splashColor, archetype) {
-  const parts = [renderDeckColorSummary(deckColors)];
+  const deckParts = [renderDeckColorSummary(deckColors)];
   if (splashColor) {
-    parts.push(`Splash ${renderDeckColorSummary(splashColor)}`);
+    deckParts.push(`Splash ${renderDeckColorSummary(splashColor)}`);
   }
+  const parts = [`<span class="inline-deck-summary">${deckParts.join(" / ")}</span>`];
   const archetypeLabel = normalizeArchetypes(archetype).join(", ");
   if (archetypeLabel) {
     parts.push(escapeHtml(archetypeLabel));
