@@ -322,8 +322,10 @@ const matchEntries = [];
 let currentDate = "";
 let currentCalendarMonth = "";
 let currentEventId = null;
+let editingEventId = null;
 let currentMatchBack = "screen-date";
 let activeUserId = null;
+let impersonatedUserId = null;
 let viewedPersonalStatsSubject = null;
 let viewedEventParticipantSubject = null;
 let currentAuthUser = null;
@@ -403,6 +405,13 @@ const elements = {
   accountStylePreviewName: document.getElementById("account-style-preview-name"),
   profileColorInput: document.getElementById("profile-color-input"),
   profileColorValue: document.getElementById("profile-color-value"),
+  adminVisibilitySection: document.getElementById("admin-visibility-section"),
+  adminVisibilityTitle: document.getElementById("admin-visibility-title"),
+  adminVisibilityHint: document.getElementById("admin-visibility-hint"),
+  toggleAdminUiButton: document.getElementById("toggle-admin-ui-button"),
+  adminImpersonationSection: document.getElementById("admin-impersonation-section"),
+  adminImpersonationSelect: document.getElementById("admin-impersonation-select"),
+  adminImpersonationHint: document.getElementById("admin-impersonation-hint"),
   roundPrefillModalShell: document.getElementById("round-prefill-modal-shell"),
   roundPrefillModalBackdrop: document.getElementById("round-prefill-modal-backdrop"),
   roundPrefillModalClose: document.getElementById("round-prefill-modal-close"),
@@ -421,6 +430,8 @@ const elements = {
   removeLocationSelect: document.getElementById("remove-location-select"),
   removeLocationButton: document.getElementById("remove-location-button"),
   adminEventTools: document.getElementById("admin-event-tools"),
+  editEventSelect: document.getElementById("edit-event-select"),
+  editEventButton: document.getElementById("edit-event-button"),
   removeEventSelect: document.getElementById("remove-event-select"),
   removeEventButton: document.getElementById("remove-event-button"),
   removeEventPlayerEventSelect: document.getElementById("remove-event-player-event-select"),
@@ -444,6 +455,7 @@ const elements = {
   selectedDatePill: document.getElementById("selected-date-pill"),
     duplicateAlert: document.getElementById("duplicate-alert"),
     eventForm: document.getElementById("event-form"),
+    eventDetailsTitle: document.getElementById("event-details-title"),
     setSelect: document.getElementById("set-select"),
     eventFormatSelect: document.getElementById("event-format-select"),
     eventRoundsInput: document.getElementById("event-rounds-input"),
@@ -451,6 +463,7 @@ const elements = {
   podCountInput: document.getElementById("pod-count-input"),
   newLocationInput: document.getElementById("new-location-input"),
   createLocationButton: document.getElementById("create-location-button"),
+  saveEventButton: document.getElementById("save-event-button"),
     matchBackButton: document.getElementById("match-back-button"),
     currentEventBanner: document.getElementById("current-event-banner"),
     matchRoundNav: document.getElementById("match-round-nav"),
@@ -526,6 +539,8 @@ async function init() {
     elements.podSelect,
     elements.archetypeSelect,
     elements.opponentSelect,
+    elements.adminImpersonationSelect,
+    elements.editEventSelect,
     elements.removeEventSelect,
     elements.removeLocationSelect,
     elements.removeOpponentSelect
@@ -554,6 +569,8 @@ async function init() {
   elements.saveNicknameButton?.addEventListener("click", handleSaveNickname);
   elements.changePasswordButton?.addEventListener("click", handleChangePassword);
   elements.signOutButton?.addEventListener("click", handleSignOut);
+  elements.toggleAdminUiButton?.addEventListener("click", handleToggleAdminUiVisibility);
+  elements.adminImpersonationSelect?.addEventListener("change", handleAdminImpersonationChange);
   elements.profileColorInput?.addEventListener("input", handleAccentColorInput);
   elements.nicknameInput?.addEventListener("input", updateProfileStylePreview);
   elements.passwordInput?.addEventListener("keydown", handleAuthPasswordKeydown);
@@ -576,6 +593,7 @@ async function init() {
   });
   elements.createLocationButton.addEventListener("click", handleCreateLocation);
   elements.removeLocationButton?.addEventListener("click", handleRemoveLocation);
+  elements.editEventButton?.addEventListener("click", handleEditEvent);
   elements.removeEventButton?.addEventListener("click", handleRemoveEvent);
   elements.removeEventPlayerEventSelect?.addEventListener("change", handleRemoveEventPlayerEventChange);
   elements.removeEventPlayerButton?.addEventListener("click", handleRemoveEventPlayer);
@@ -682,14 +700,16 @@ function mergePersistedUsers(persistedUsers) {
           user.accentTheme ||
           userProfiles[existingIndex].accentColor ||
           userProfiles[existingIndex].accentTheme
-        )
+        ),
+        showAdminUi: user.showAdminUi ?? userProfiles[existingIndex].showAdminUi ?? true
       };
     } else {
       userProfiles.push({
         id: normalizedId,
         nickname: user.nickname || "",
         provider: user.provider || "",
-        accentColor: sanitizeAccentColor(user.accentColor || user.accentTheme)
+        accentColor: sanitizeAccentColor(user.accentColor || user.accentTheme),
+        showAdminUi: user.showAdminUi ?? true
       });
     }
   });
@@ -751,6 +771,28 @@ function getActiveUserRecord() {
   return activeUserId ? getUserRecord(activeUserId) : null;
 }
 
+function getAuthenticatedUserId() {
+  return currentAuthUser ? normalizeUserId(currentAuthUser.uid) : null;
+}
+
+function getAuthenticatedUserRecord() {
+  const authenticatedUserId = getAuthenticatedUserId();
+  return authenticatedUserId ? getUserRecord(authenticatedUserId) : null;
+}
+
+function getUserProfileRecord(userId) {
+  return userProfiles.find(user => user.id === normalizeUserId(userId)) || null;
+}
+
+function getActiveUserProfile() {
+  return activeUserId ? getUserProfileRecord(activeUserId) : null;
+}
+
+function getAuthenticatedUserProfile() {
+  const authenticatedUserId = getAuthenticatedUserId();
+  return authenticatedUserId ? getUserProfileRecord(authenticatedUserId) : null;
+}
+
 function getUserRecord(userId) {
   return users.find(user => user.id === normalizeUserId(userId)) || null;
 }
@@ -790,6 +832,10 @@ function hasUsableNickname() {
   return Boolean(getActiveUserRecord()?.name);
 }
 
+function hasAuthenticatedUserNickname() {
+  return Boolean(getAuthenticatedUserRecord()?.name);
+}
+
 function ensureAuthenticatedForApp() {
   if (!currentAuthUser) {
     showUserAlert("Sign in first.");
@@ -804,12 +850,20 @@ function ensureAuthenticatedForApp() {
   return true;
 }
 
-function isAdminUser() {
-  return normalize(getActiveUserName()) === "steph";
+function isAdminCapableUser() {
+  return normalize(getAuthenticatedUserName()) === "steph";
+}
+
+function isAdminUiEnabled() {
+  if (!isAdminCapableUser()) {
+    return false;
+  }
+
+  return getAuthenticatedUserProfile()?.showAdminUi !== false;
 }
 
 function updateAdminUiState() {
-  const showAdminTools = isAdminUser();
+  const showAdminTools = isAdminUiEnabled();
   elements.adminEventTools?.classList.toggle("d-none", !showAdminTools);
   elements.adminLocationTools?.classList.toggle("d-none", !showAdminTools);
   elements.adminOpponentTools?.classList.toggle("d-none", !showAdminTools);
@@ -818,10 +872,46 @@ function updateAdminUiState() {
     return;
   }
 
+  populateEditEventSelect();
   populateRemoveEventSelect();
   populateRemoveEventPlayerEventSelect();
   populateRemoveLocationSelect();
   populateRemoveOpponentSelect();
+}
+
+function populateEventAdminSelect(selectElement, selectedValue = "") {
+  if (!selectElement) {
+    return [];
+  }
+
+  const selectedDate = currentDate || elements.dateInput?.value || "";
+  const dayEvents = selectedDate ? getEventsOnDate(selectedDate) : [];
+
+  selectElement.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select event...";
+  selectElement.appendChild(placeholder);
+
+  dayEvents.forEach(event => {
+    const option = document.createElement("option");
+    option.value = String(event.id);
+    option.textContent = getEventAdminLabel(event);
+    selectElement.appendChild(option);
+  });
+
+  const optionValues = [...selectElement.options].map(option => option.value);
+  selectElement.value = optionValues.includes(String(selectedValue)) ? String(selectedValue) : "";
+  selectElement.disabled = dayEvents.length === 0;
+
+  return dayEvents;
+}
+
+function populateEditEventSelect(selectedValue = "") {
+  const dayEvents = populateEventAdminSelect(elements.editEventSelect, selectedValue);
+  if (elements.editEventButton) {
+    elements.editEventButton.disabled = dayEvents.length === 0;
+  }
 }
 
 function populateRemoveUserSelect() {
@@ -876,25 +966,7 @@ function populateRemoveEventSelect(selectedValue = "") {
     return;
   }
 
-  const selectedDate = currentDate || elements.dateInput?.value || "";
-  const dayEvents = selectedDate ? getEventsOnDate(selectedDate) : [];
-
-  elements.removeEventSelect.innerHTML = "";
-  const placeholder = document.createElement("option");
-  placeholder.value = "";
-  placeholder.textContent = "Select event...";
-  elements.removeEventSelect.appendChild(placeholder);
-
-  dayEvents.forEach(event => {
-    const option = document.createElement("option");
-    option.value = String(event.id);
-    option.textContent = getEventAdminLabel(event);
-    elements.removeEventSelect.appendChild(option);
-  });
-
-  const optionValues = [...elements.removeEventSelect.options].map(option => option.value);
-  elements.removeEventSelect.value = optionValues.includes(String(selectedValue)) ? String(selectedValue) : "";
-  elements.removeEventSelect.disabled = dayEvents.length === 0;
+  const dayEvents = populateEventAdminSelect(elements.removeEventSelect, selectedValue);
   if (elements.removeEventButton) {
     elements.removeEventButton.disabled = dayEvents.length === 0;
   }
@@ -1375,6 +1447,8 @@ function setAuthControlsDisabled(isDisabled) {
     elements.newPasswordInput,
     elements.confirmPasswordInput,
     elements.changePasswordButton,
+    elements.toggleAdminUiButton,
+    elements.adminImpersonationSelect,
     elements.signOutButton
   ].forEach(control => {
     if (control) {
@@ -1556,13 +1630,59 @@ function getPlayerAchievements(userId) {
   return evaluateRuleSet(ACHIEVEMENT_RULES, buildPlayerProgressContext(userId));
 }
 
-function getGlobalLeaderboardRows(activeUsersWithMatches = users.filter(user => matchEntries.some(entry => entry.userId === user.id))) {
-  return activeUsersWithMatches
+function createTrackedMatchPerspective(match, userId) {
+  const normalizedUserId = normalizeUserId(userId);
+  const isPlayerA = normalizedUserId === match.playerAId;
+  const gamesWon = isPlayerA ? match.gamesA : match.gamesB;
+  const gamesLost = isPlayerA ? match.gamesB : match.gamesA;
+  const opponentUserId = isPlayerA ? match.playerBId : match.playerAId;
+  const result = match.winnerId
+    ? match.winnerId === normalizedUserId ? "win" : "loss"
+    : "draw";
+
+  return {
+    eventId: match.eventId,
+    userId: normalizedUserId,
+    round: match.round,
+    opponentKind: "tracked",
+    opponentUserId,
+    opponentName: getUserName(opponentUserId),
+    result,
+    score: `${gamesWon}-${gamesLost}`
+  };
+}
+
+function getGlobalStatsEntriesForUser(userId, canonicalFriendMatches = buildCanonicalFriendMatches()) {
+  const normalizedUserId = normalizeUserId(userId);
+  const directUntrackedEntries = matchEntries.filter(entry =>
+    normalizeUserId(entry.userId) === normalizedUserId &&
+    !(entry.opponentKind === "tracked" && entry.opponentUserId)
+  );
+  const trackedPerspectives = canonicalFriendMatches
+    .filter(match => match.playerAId === normalizedUserId || match.playerBId === normalizedUserId)
+    .map(match => createTrackedMatchPerspective(match, normalizedUserId));
+
+  return [...directUntrackedEntries, ...trackedPerspectives];
+}
+
+function getGlobalMatchCount(canonicalFriendMatches = buildCanonicalFriendMatches()) {
+  const untrackedEntries = matchEntries.filter(entry =>
+    !(entry.opponentKind === "tracked" && entry.opponentUserId)
+  );
+  return untrackedEntries.length + canonicalFriendMatches.length;
+}
+
+function getGlobalLeaderboardRows(activeUsers = users) {
+  const canonicalFriendMatches = buildCanonicalFriendMatches();
+  return activeUsers
     .map(user => {
-      const allStats = computeEntryStats(matchEntries.filter(entry => entry.userId === user.id));
-      const friendStats = computeEntryStats(matchEntries.filter(entry => entry.userId === user.id && entry.opponentKind === "tracked"));
+      const allEntries = getGlobalStatsEntriesForUser(user.id, canonicalFriendMatches);
+      const friendEntries = allEntries.filter(entry => entry.opponentKind === "tracked");
+      const allStats = computeEntryStats(allEntries);
+      const friendStats = computeEntryStats(friendEntries);
       return { user, allStats, friendStats };
     })
+    .filter(row => row.allStats.matches > 0)
     .sort((left, right) =>
       right.allStats.matchWinRate - left.allStats.matchWinRate ||
       right.allStats.matches - left.allStats.matches ||
@@ -1638,7 +1758,7 @@ function openAccountModal() {
     return;
   }
 
-  hydratePendingProfileCustomizationFromActiveUser();
+  hydratePendingProfileCustomizationFromAuthenticatedUser();
   isAccountModalOpen = true;
   elements.accountModalShell?.classList.remove("d-none");
   elements.accountModalShell?.setAttribute("aria-hidden", "false");
@@ -1717,6 +1837,7 @@ function renderAuthUi() {
   const isSignedIn = Boolean(currentAuthUser);
   const canUseApp = Boolean(isSignedIn && hasUsableNickname());
   const displayName = hasUsableNickname() ? getActiveUserName() : "Nickname needed";
+  const authenticatedDisplayName = hasAuthenticatedUserNickname() ? getAuthenticatedUserName() : "Nickname needed";
   const passwordEnabled = hasPasswordProvider();
   const showAuthLoadingOverlay = !authResolved || (authBusy && !currentAuthUser);
 
@@ -1727,7 +1848,7 @@ function renderAuthUi() {
   elements.trackButton?.classList.toggle("d-none", !isSignedIn);
   elements.welcomeMessage?.classList.toggle("d-none", !isSignedIn);
   elements.accountMenuButton?.classList.toggle("d-none", !isSignedIn);
-  elements.accountMenuButton?.setAttribute("aria-label", isSignedIn ? `Open account menu for ${displayName}` : "Open account menu");
+  elements.accountMenuButton?.setAttribute("aria-label", isSignedIn ? `Open account menu for ${authenticatedDisplayName}` : "Open account menu");
 
   if (elements.welcomeMessage) {
     if (isSignedIn) {
@@ -1781,13 +1902,14 @@ function renderAuthUi() {
 
   if (elements.nicknameInput) {
     const currentValue = elements.nicknameInput.value.trim();
-    const desiredValue = hasUsableNickname() ? getActiveUserName() : elements.registerNicknameInput?.value.trim() || "";
+    const desiredValue = hasAuthenticatedUserNickname() ? getAuthenticatedUserName() : elements.registerNicknameInput?.value.trim() || "";
     if (!currentValue || currentValue === desiredValue || needsNicknameSetup) {
       elements.nicknameInput.value = desiredValue;
     }
   }
 
   renderProfileCustomizationControls();
+  renderAdminVisibilityControls();
 
   elements.passwordSection?.classList.toggle("d-none", !passwordEnabled);
   elements.passwordUnavailableNote?.classList.toggle("d-none", passwordEnabled);
@@ -1828,8 +1950,8 @@ function renderAuthLoadingOverlay(isVisible) {
   document.body.classList.toggle("auth-loading-open", isVisible);
 }
 
-function hydratePendingProfileCustomizationFromActiveUser() {
-  const appearance = getUserAppearance(activeUserId);
+function hydratePendingProfileCustomizationFromAuthenticatedUser() {
+  const appearance = getUserAppearance(getAuthenticatedUserId());
   pendingAccentColor = appearance.accentColor;
 }
 
@@ -1846,8 +1968,76 @@ function renderProfileCustomizationControls() {
   updateProfileStylePreview();
 }
 
+function renderAdminVisibilityControls() {
+  const canManageAdminUi = isAdminCapableUser();
+  const adminUiVisible = isAdminUiEnabled();
+
+  elements.adminVisibilitySection?.classList.toggle("d-none", !canManageAdminUi);
+  elements.adminImpersonationSection?.classList.toggle("d-none", !canManageAdminUi);
+
+  if (!canManageAdminUi) {
+    return;
+  }
+
+  if (elements.adminVisibilityTitle) {
+    elements.adminVisibilityTitle.textContent = adminUiVisible ? "Admin UI enabled" : "Admin UI hidden";
+  }
+
+  if (elements.adminVisibilityHint) {
+    elements.adminVisibilityHint.textContent = adminUiVisible
+      ? "You can hide the delete and cleanup controls until you need them again."
+      : "The admin tools are currently hidden across the app. You can turn them back on here anytime.";
+  }
+
+  if (elements.toggleAdminUiButton) {
+    elements.toggleAdminUiButton.textContent = adminUiVisible ? "Hide admin UI" : "Show admin UI";
+  }
+
+  populateAdminImpersonationSelect();
+}
+
+function populateAdminImpersonationSelect() {
+  if (!elements.adminImpersonationSelect) {
+    return;
+  }
+
+  const authenticatedUserId = getAuthenticatedUserId();
+  const authenticatedName = getAuthenticatedUserName();
+  const currentValue = impersonatedUserId || authenticatedUserId || "";
+
+  elements.adminImpersonationSelect.innerHTML = "";
+
+  const ownOption = document.createElement("option");
+  ownOption.value = authenticatedUserId || "";
+  ownOption.textContent = `${authenticatedName} (my account)`;
+  elements.adminImpersonationSelect.appendChild(ownOption);
+
+  users
+    .filter(user => user.id !== authenticatedUserId)
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .forEach(user => {
+      const option = document.createElement("option");
+      option.value = user.id;
+      option.textContent = user.name;
+      elements.adminImpersonationSelect.appendChild(option);
+    });
+
+  const optionValues = [...elements.adminImpersonationSelect.options].map(option => option.value);
+  if (!optionValues.includes(currentValue)) {
+    impersonatedUserId = null;
+    applyEffectiveActiveUser();
+  }
+  elements.adminImpersonationSelect.value = optionValues.includes(currentValue) ? currentValue : authenticatedUserId || "";
+
+  if (elements.adminImpersonationHint) {
+    elements.adminImpersonationHint.textContent = impersonatedUserId
+      ? `Viewing the app as ${getUserName(impersonatedUserId)}.`
+      : "Choose a player to view and enter data as them.";
+  }
+}
+
 function updateProfileStylePreview() {
-  const previewName = elements.nicknameInput?.value.trim() || getActiveUserName();
+  const previewName = elements.nicknameInput?.value.trim() || getAuthenticatedUserName();
   const appearance = getAvatarAppearance(pendingAccentColor);
 
   if (elements.accountStylePreviewAvatar) {
@@ -2016,7 +2206,8 @@ function upsertCurrentAuthProfile(profile) {
     id: normalizeUserId(profile.id),
     nickname: profile.nickname || "",
     provider: profile.provider || getProviderLabel(currentAuthUser),
-    accentColor: sanitizeAccentColor(profile.accentColor || profile.accentTheme)
+    accentColor: sanitizeAccentColor(profile.accentColor || profile.accentTheme),
+    showAdminUi: profile.showAdminUi
   }]);
 }
 
@@ -2024,7 +2215,8 @@ async function handleAuthStateChange(user) {
   authResolved = false;
   renderAuthUi();
   currentAuthUser = user;
-  activeUserId = user ? normalizeUserId(user.uid) : null;
+  impersonatedUserId = null;
+  applyEffectiveActiveUser();
   viewedPersonalStatsSubject = createTrackedPersonalStatsSubject(activeUserId);
   viewedEventParticipantSubject = null;
 
@@ -2047,7 +2239,8 @@ async function handleAuthStateChange(user) {
       id: normalizeUserId(user.uid),
       nickname: "",
       provider: getProviderLabel(user),
-      accentColor: defaultAccentColor
+      accentColor: defaultAccentColor,
+      showAdminUi: true
     };
 
     upsertCurrentAuthProfile(profile);
@@ -2217,7 +2410,8 @@ async function saveProfileForCurrentUser(profileDraft, authUser = currentAuthUse
       id: normalizeUserId(authUser.uid),
       nickname,
       provider: getProviderLabel(authUser),
-      accentColor: sanitizeAccentColor(profileDraft?.accentColor || existingAppearance.accentColor)
+      accentColor: sanitizeAccentColor(profileDraft?.accentColor || existingAppearance.accentColor),
+      showAdminUi: profileDraft?.showAdminUi ?? getAuthenticatedUserProfile()?.showAdminUi ?? true
     };
 
     await saveUserProfile(userProfile);
@@ -2232,7 +2426,10 @@ async function saveProfileForCurrentUser(profileDraft, authUser = currentAuthUse
       throw new Error("nickname-self-conflict");
     }
 
-    activeUserId = normalizeUserId(authUser.uid);
+    if (!isAdminCapableUser()) {
+      impersonatedUserId = null;
+    }
+    applyEffectiveActiveUser();
     needsNicknameSetup = false;
     pendingAccentColor = userProfile.accentColor;
     if (elements.registerNicknameInput) {
@@ -2255,6 +2452,45 @@ async function saveProfileForCurrentUser(profileDraft, authUser = currentAuthUse
 function handleAccentColorInput(event) {
   pendingAccentColor = sanitizeAccentColor(event.target?.value);
   renderProfileCustomizationControls();
+}
+
+function applyEffectiveActiveUser() {
+  activeUserId = impersonatedUserId || getAuthenticatedUserId();
+}
+
+function handleAdminImpersonationChange() {
+  if (!isAdminCapableUser()) {
+    return;
+  }
+
+  const authenticatedUserId = getAuthenticatedUserId();
+  const selectedUserId = normalizeUserId(elements.adminImpersonationSelect?.value || "");
+  const canImpersonateSelectedUser = selectedUserId && users.some(user => user.id === selectedUserId);
+  impersonatedUserId = canImpersonateSelectedUser && selectedUserId !== authenticatedUserId ? selectedUserId : null;
+  applyEffectiveActiveUser();
+  viewedPersonalStatsSubject = createTrackedPersonalStatsSubject(activeUserId);
+  viewedEventParticipantSubject = null;
+  closeRoundPrefillModal();
+  refreshUserBoundUi();
+  syncNavigationHistory("replace", getActiveScreenId());
+  showAccountModalAlert(impersonatedUserId
+    ? `Viewing as ${getUserName(impersonatedUserId)}.`
+    : "Back to your account.");
+}
+
+async function handleToggleAdminUiVisibility() {
+  if (!currentAuthUser || !isAdminCapableUser()) {
+    return;
+  }
+
+  const nextShowAdminUi = getAuthenticatedUserProfile()?.showAdminUi === false;
+  await saveProfileForCurrentUser({
+    nickname: elements.nicknameInput?.value.trim() || getAuthenticatedUserName(),
+    accentColor: pendingAccentColor,
+    showAdminUi: nextShowAdminUi
+  }, currentAuthUser, {
+    successMessage: nextShowAdminUi ? "Admin UI enabled." : "Admin UI hidden."
+  });
 }
 
 async function handleChangePassword() {
@@ -2604,6 +2840,32 @@ function handleRemoveEvent() {
   deleteEventById(selectedEventId);
 }
 
+function handleEditEvent() {
+  const selectedValue = elements.editEventSelect?.value || "";
+  if (!selectedValue) {
+    window.alert("Select an event to edit.");
+    return;
+  }
+
+  const selectedEventId = normalizeRecordId(selectedValue);
+  const event = events.find(entry => entry.id === selectedEventId);
+  if (!event) {
+    window.alert("That event could not be found.");
+    populateEditEventSelect();
+    return;
+  }
+
+  currentDate = event.date;
+  if (elements.dateInput) {
+    elements.dateInput.value = event.date;
+  }
+  setCalendarMonthFromDate(event.date);
+  syncDateView(event.date);
+  populateEventFormForEdit(event.id);
+  showScreen("details");
+  syncNavigationHistory("push", "screen-details");
+}
+
 function handleRemoveEventPlayerEventChange() {
   populateRemoveEventPlayerSelect(elements.removeEventPlayerEventSelect?.value || "");
 }
@@ -2778,15 +3040,24 @@ function handleSaveEvent(event) {
   const rounds = Number(elements.eventRoundsInput.value);
   const location = elements.locationSelect.value.trim();
   const podCount = Number(elements.podCountInput.value);
+  const editingEvent = editingEventId ? events.find(entry => entry.id === editingEventId) : null;
 
   if (!date || !set || !format || !location || !Number.isInteger(rounds) || rounds < 1 || !Number.isInteger(podCount) || podCount < 1) {
     showDuplicateAlert("Set, format, rounds, location, and a valid pod count are required.");
     return;
   }
 
-  const matchingEvents = getMatchingEvents(date, set, location, format);
-  const nextIndex = getNextIndex(date, set, location, format);
-  if (matchingEvents.length) {
+  const matchingEvents = getMatchingEvents(date, set, location, format)
+    .filter(event => event.id !== editingEventId);
+  const isSameSeries = editingEvent &&
+    editingEvent.date === date &&
+    editingEvent.set === set &&
+    getNormalizedFormat(editingEvent.format) === getNormalizedFormat(format) &&
+    normalize(editingEvent.location) === normalize(location);
+  const nextIndex = isSameSeries && editingEvent
+    ? editingEvent.index || 1
+    : getNextIndexExcludingEvent(date, set, location, format, editingEventId);
+  if (matchingEvents.length && !isSameSeries) {
     const confirmation = window.confirm(
       `An event with the same date, set, format, and location already exists. If you continue, you will create Event ${nextIndex}.`
     );
@@ -2795,6 +3066,36 @@ function handleSaveEvent(event) {
       updatePotentialDuplicateNotice();
       return;
     }
+  }
+
+  if (editingEvent) {
+    const previousSeries = {
+      date: editingEvent.date,
+      set: editingEvent.set,
+      location: editingEvent.location,
+      format: editingEvent.format
+    };
+
+    Object.assign(editingEvent, {
+      date,
+      set,
+      index: nextIndex,
+      format,
+      rounds,
+      location,
+      podCount
+    });
+
+    reconcilePodsForEvent(editingEvent.id, podCount);
+    persistEventRecord(editingEvent);
+    reindexMatchingEventSeries(previousSeries.date, previousSeries.set, previousSeries.location, previousSeries.format);
+    reindexMatchingEventSeries(date, set, location, format);
+    editingEventId = null;
+    syncDateView(date);
+    renderActivityFeed();
+    showScreen("date");
+    syncNavigationHistory("replace", "screen-date");
+    return;
   }
 
   const createdEvent = {
@@ -3121,7 +3422,7 @@ function populateUserSelect() {
   });
 
   elements.activeUserSelect.value = activeUserId ? String(activeUserId) : "";
-  if (isAdminUser()) {
+  if (isAdminUiEnabled()) {
     populateRemoveUserSelect();
   }
 }
@@ -3142,7 +3443,7 @@ function populateLocationSelect(selectedLocation = "") {
   });
 
   elements.locationSelect.value = selectedLocation || "";
-  if (isAdminUser()) {
+  if (isAdminUiEnabled()) {
     populateRemoveLocationSelect();
   }
 }
@@ -3273,7 +3574,7 @@ function populateOpponentSelect(selectedValue = "") {
 
   const optionValues = [...elements.opponentSelect.options].map(option => option.value);
   elements.opponentSelect.value = optionValues.includes(selectedValue) ? selectedValue : "npc";
-  if (isAdminUser()) {
+  if (isAdminUiEnabled()) {
     populateRemoveOpponentSelect();
   }
 }
@@ -3353,6 +3654,8 @@ function createNavigationState(screenId = getActiveScreenId()) {
     currentDate: currentDate || elements.dateInput?.value || getTodayIsoLocal(),
     currentCalendarMonth: currentCalendarMonth || getMonthStartIso(currentDate || elements.dateInput?.value || getTodayIsoLocal()),
     currentEventId: currentEventId || "",
+    editingEventId: editingEventId || "",
+    impersonatedUserId: impersonatedUserId || "",
     currentMatchBack,
     currentSelectedRound,
     viewedPersonalStatsSubject: cloneViewedPersonalStatsSubject(viewedPersonalStatsSubject),
@@ -3372,6 +3675,11 @@ function applyNavigationState(state) {
   syncDateView(nextDate);
 
   currentEventId = nextState.currentEventId || null;
+  editingEventId = nextState.editingEventId || null;
+  impersonatedUserId = isAdminCapableUser() && nextState.impersonatedUserId
+    ? normalizeUserId(nextState.impersonatedUserId)
+    : null;
+  applyEffectiveActiveUser();
   currentMatchBack = nextState.currentMatchBack || "screen-date";
   currentSelectedRound = Number.isInteger(nextState.currentSelectedRound) ? nextState.currentSelectedRound : Number(nextState.currentSelectedRound) || 1;
   viewedPersonalStatsSubject = cloneViewedPersonalStatsSubject(nextState.viewedPersonalStatsSubject) || createTrackedPersonalStatsSubject(activeUserId);
@@ -3404,6 +3712,11 @@ function applyNavigationState(state) {
       currentDate = nextDate;
       if (elements.selectedDatePill) {
         elements.selectedDatePill.textContent = formatDate(currentDate);
+      }
+      if (editingEventId) {
+        populateEventFormForEdit(editingEventId);
+      } else {
+        resetEventForm();
       }
       updatePotentialDuplicateNotice();
       showScreen("details");
@@ -3687,6 +4000,7 @@ function enterDetailsStep() {
 
   currentDate = elements.dateInput.value;
   elements.selectedDatePill.textContent = formatDate(currentDate);
+  editingEventId = null;
   resetEventForm();
   updatePotentialDuplicateNotice();
   showScreen("details");
@@ -3694,18 +4008,59 @@ function enterDetailsStep() {
 }
 
 function resetEventForm() {
-    if (enhancedSelects.set) {
-      enhancedSelects.set.setValue("", true);
-    } else {
-      elements.setSelect.value = "";
-    }
+  editingEventId = null;
+  updateEventDetailsMode();
+  if (enhancedSelects.set) {
+    enhancedSelects.set.setValue("", true);
+  } else {
+    elements.setSelect.value = "";
+  }
   elements.eventFormatSelect.value = "Draft";
   elements.eventRoundsInput.value = "3";
-    populateLocationSelect();
-    elements.podCountInput.value = "1";
-    elements.newLocationInput.value = "";
-    updateSetPreview();
-    hideDuplicateAlert();
+  populateLocationSelect();
+  elements.podCountInput.value = "1";
+  elements.newLocationInput.value = "";
+  updateSetPreview();
+  hideDuplicateAlert();
+}
+
+function populateEventFormForEdit(eventId) {
+  const event = events.find(entry => entry.id === normalizeRecordId(eventId));
+  if (!event) {
+    resetEventForm();
+    return;
+  }
+
+  editingEventId = event.id;
+  currentDate = event.date;
+  if (elements.selectedDatePill) {
+    elements.selectedDatePill.textContent = formatDate(currentDate);
+  }
+  updateEventDetailsMode();
+
+  if (enhancedSelects.set) {
+    enhancedSelects.set.setValue(event.set || "", true);
+  } else {
+    elements.setSelect.value = event.set || "";
+  }
+
+  elements.eventFormatSelect.value = getNormalizedFormat(event.format);
+  elements.eventRoundsInput.value = String(event.rounds || 3);
+  populateLocationSelect(event.location || "");
+  elements.podCountInput.value = String(event.podCount || 1);
+  elements.newLocationInput.value = "";
+  updateSetPreview();
+  updatePotentialDuplicateNotice();
+}
+
+function updateEventDetailsMode() {
+  const isEditing = Boolean(editingEventId);
+  if (elements.eventDetailsTitle) {
+    elements.eventDetailsTitle.textContent = isEditing ? "Edit event" : "Create new event";
+  }
+  if (elements.saveEventButton) {
+    elements.saveEventButton.textContent = isEditing ? "Save changes" : "Save / Create";
+  }
 }
 
 function chooseExistingEvent(eventId) {
@@ -4262,7 +4617,7 @@ function renderNamedEventRoundCards(entries) {
 }
 
 function renderGlobalStats() {
-  const activeUsersWithMatches = users.filter(user => matchEntries.some(entry => entry.userId === user.id));
+  const canonicalFriendMatches = buildCanonicalFriendMatches();
   const eventIdsWithMatches = [...new Set(matchEntries.map(entry => entry.eventId))];
   const mostPlayedSet = getMostPlayedSet();
 
@@ -4271,12 +4626,12 @@ function renderGlobalStats() {
     elements.statsLeaderboardHeading.innerHTML = renderGlobalLeaderboardHeading(mostPlayedSet);
   }
   elements.statsOverviewGrid.innerHTML = [
-    createStatTile(matchEntries.length, "matches logged"),
+    createStatTile(getGlobalMatchCount(canonicalFriendMatches), "matches logged"),
     createStatTile(eventIdsWithMatches.length, "events with data"),
     createStatTile(mostPlayedSet || "-", "most played set")
   ].join("");
 
-  renderGlobalLeaderboardStats(activeUsersWithMatches);
+  renderGlobalLeaderboardStats();
   renderGlobalRosters();
 }
 
@@ -4445,13 +4800,13 @@ function renderNamedOpponentStatsPage(opponentName) {
   renderNamedOpponentHistory(opponentName, opponentEntries, elements.statsHistory);
 }
 
-function renderGlobalLeaderboardStats(activeUsersWithMatches) {
-  if (!activeUsersWithMatches.length) {
+function renderGlobalLeaderboardStats() {
+  const rows = getGlobalLeaderboardRows();
+
+  if (!rows.length) {
     elements.statsLeaderboard.innerHTML = '<div class="empty-state">No group data yet. Log some matches first.</div>';
     return;
   }
-
-  const rows = getGlobalLeaderboardRows(activeUsersWithMatches);
 
   elements.statsLeaderboard.innerHTML = rows.map(({ user, allStats, friendStats }, index) =>
     createListCard(
@@ -5654,6 +6009,15 @@ function getNextIndex(date, set, location, format = "Draft") {
     : 1;
 }
 
+function getNextIndexExcludingEvent(date, set, location, format = "Draft", excludedEventId = "") {
+  const normalizedExcludedEventId = normalizeRecordId(excludedEventId);
+  const matchingEvents = getMatchingEvents(date, set, location, format)
+    .filter(event => event.id !== normalizedExcludedEventId);
+  return matchingEvents.length
+    ? Math.max(...matchingEvents.map(event => event.index)) + 1
+    : 1;
+}
+
 function getLocationOptions() {
   const merged = [...baseLocations, ...customLocations];
   return dedupeStrings(merged);
@@ -5684,6 +6048,18 @@ function seedPodsForEvent(eventId, podCount) {
 
   for (let index = 0; index < podCount; index += 1) {
     eventPods.push({ eventId, label: `Pod ${index + 1}` });
+  }
+}
+
+function reconcilePodsForEvent(eventId, podCount) {
+  const normalizedEventId = normalizeRecordId(eventId);
+  const nextPodCount = Math.max(1, Number(podCount) || 1);
+  const existingPods = eventPods
+    .filter(entry => entry.eventId === normalizedEventId)
+    .sort((left, right) => extractPodNumber(left.label) - extractPodNumber(right.label) || left.label.localeCompare(right.label));
+
+  for (let index = existingPods.length; index < nextPodCount; index += 1) {
+    eventPods.push({ eventId: normalizedEventId, label: `Pod ${index + 1}` });
   }
 }
 
@@ -5803,6 +6179,11 @@ function getUserName(userId) {
 
 function getActiveUserName() {
   return activeUserId ? getUserName(activeUserId) : "Unknown player";
+}
+
+function getAuthenticatedUserName() {
+  const authenticatedUserId = getAuthenticatedUserId();
+  return authenticatedUserId ? getUserName(authenticatedUserId) : "Unknown player";
 }
 
 function getOpponentDisplayName(match) {
@@ -6057,12 +6438,21 @@ function updatePotentialDuplicateNotice() {
     return;
   }
 
-  const nextIndex = getNextIndex(currentDate, set, location, format);
-  if (nextIndex === 1) {
+  const matchingEvents = getMatchingEvents(currentDate, set, location, format)
+    .filter(event => event.id !== editingEventId);
+  const editingEvent = editingEventId ? events.find(event => event.id === editingEventId) : null;
+  const isSameSeries = editingEvent &&
+    editingEvent.date === currentDate &&
+    editingEvent.set === set &&
+    getNormalizedFormat(editingEvent.format) === getNormalizedFormat(format) &&
+    normalize(editingEvent.location) === normalize(location);
+
+  if (!matchingEvents.length || isSameSeries) {
     hideDuplicateAlert();
     return;
   }
 
+  const nextIndex = getNextIndexExcludingEvent(currentDate, set, location, format, editingEventId);
   showDuplicateAlert(`A matching event already exists for this set, format, and location. Saving will ask for confirmation and create Event ${nextIndex}.`);
 }
 

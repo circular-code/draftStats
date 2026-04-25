@@ -239,7 +239,8 @@ export async function loadPersistedState() {
         id: normalizeUserId(user.id),
         nickname: user.nickname || "",
         provider: user.provider || "",
-        accentColor: user.accentColor || user.accentTheme || ""
+        accentColor: user.accentColor || user.accentTheme || "",
+        showAdminUi: user.showAdminUi !== false
       }))
       .filter(user => user.id),
     customLocations: customLocations.map(entry => entry.name || "").filter(Boolean),
@@ -289,7 +290,8 @@ export async function loadUserProfile(userId) {
     id: normalizeUserId(data.id || userId),
     nickname: data.nickname || "",
     provider: data.provider || "",
-    accentColor: data.accentColor || data.accentTheme || ""
+    accentColor: data.accentColor || data.accentTheme || "",
+    showAdminUi: data.showAdminUi !== false
   };
 }
 
@@ -304,7 +306,8 @@ export async function saveUserProfile(userProfile) {
       id: normalizeUserId(userProfile.id),
       nickname: userProfile.nickname || "",
       provider: userProfile.provider || "",
-      accentColor: userProfile.accentColor || ""
+      accentColor: userProfile.accentColor || "",
+      showAdminUi: userProfile.showAdminUi !== false
     }),
     { merge: true }
   );
