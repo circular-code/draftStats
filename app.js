@@ -481,6 +481,7 @@ const elements = {
   scoreRow: document.getElementById("score-row"),
   matchNotesInput: document.getElementById("match-notes-input"),
   saveMatchButton: document.getElementById("save-match-button"),
+  leaveEventButton: document.getElementById("leave-event-button"),
   statsBackButton: document.getElementById("stats-back-button"),
   statsSubtitle: document.getElementById("stats-subtitle"),
   statsOverviewGrid: document.getElementById("stats-overview-grid"),
@@ -616,6 +617,7 @@ async function init() {
   elements.opponentSelect.addEventListener("change", handleOpponentSelectionChange);
   elements.matchNotesInput.addEventListener("input", handleMatchNotesInput);
   elements.saveMatchButton.addEventListener("click", handleDoneWithMatch);
+  elements.leaveEventButton?.addEventListener("click", handleLeaveCurrentEvent);
   elements.scoreRow.addEventListener("click", handleScoreClick);
   elements.activityFeed?.addEventListener("click", handlePlayerStatsNavigationClick);
   elements.dateEventList?.addEventListener("click", handlePlayerStatsNavigationClick);
@@ -3224,6 +3226,28 @@ function handleDoneWithMatch() {
   }
 }
 
+function handleLeaveCurrentEvent() {
+  if (!currentEventId || !activeUserId) {
+    showMatchAlert("No active event found.");
+    return;
+  }
+
+  const event = getCurrentEvent();
+  if (!event) {
+    showMatchAlert("This event could not be found.");
+    return;
+  }
+
+  const confirmation = window.confirm(
+    `Remove yourself from ${getEventAdminLabel(event)}?\n\nThis will delete your event profile and all logged rounds in this event involving you. This cannot be undone.`
+  );
+  if (!confirmation) {
+    return;
+  }
+
+  removePlayerFromEvent(currentEventId, activeUserId);
+}
+
 function handleSaveEvent(event) {
   event.preventDefault();
 
@@ -5686,8 +5710,8 @@ function getPersonalMatchupSummary(canonicalFriendMatches, userId) {
 function renderPersonalMatchupSpotlights(matchupSummary) {
   return `
     <div class="matchup-spotlight-grid">
-      ${createPersonalMatchupSpotlightCard("Your nemesis", matchupSummary.nemesisRow, "screen-personal-stats")}
-      ${createPersonalMatchupSpotlightCard("Your easy win", matchupSummary.bestMatchupRow, "screen-personal-stats")}
+      ${createPersonalMatchupSpotlightCard("Nemesis", matchupSummary.nemesisRow, "screen-personal-stats")}
+      ${createPersonalMatchupSpotlightCard("Easy win", matchupSummary.bestMatchupRow, "screen-personal-stats")}
     </div>
   `;
 }
