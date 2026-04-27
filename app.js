@@ -328,6 +328,7 @@ let activeUserId = null;
 let impersonatedUserId = null;
 let viewedPersonalStatsSubject = null;
 let viewedEventParticipantSubject = null;
+let viewedMatchSourcesSubject = null;
 let currentAuthUser = null;
 let authResolved = false;
 let authBusy = false;
@@ -356,7 +357,8 @@ const screens = {
   friendsStats: document.getElementById("screen-friends-stats"),
   opponentsStats: document.getElementById("screen-opponents-stats"),
   personalStats: document.getElementById("screen-personal-stats"),
-  eventPlayerStats: document.getElementById("screen-event-player-stats")
+  eventPlayerStats: document.getElementById("screen-event-player-stats"),
+  matchSources: document.getElementById("screen-match-sources")
 };
 
 const elements = {
@@ -509,7 +511,12 @@ const elements = {
   eventPlayerStatsTitle: document.getElementById("event-player-stats-title"),
   eventPlayerStatsSubtitle: document.getElementById("event-player-stats-subtitle"),
   eventPlayerStatsSummary: document.getElementById("event-player-stats-summary"),
-  eventPlayerStatsRounds: document.getElementById("event-player-stats-rounds")
+  eventPlayerStatsRounds: document.getElementById("event-player-stats-rounds"),
+  matchSourcesBackButton: document.getElementById("match-sources-back-button"),
+  matchSourcesTitle: document.getElementById("match-sources-title"),
+  matchSourcesSubtitle: document.getElementById("match-sources-subtitle"),
+  matchSourcesSummary: document.getElementById("match-sources-summary"),
+  matchSourcesList: document.getElementById("match-sources-list")
 };
 
 async function init() {
@@ -617,6 +624,9 @@ async function init() {
   elements.statsAllOpponents?.addEventListener("click", handlePlayerStatsNavigationClick);
   elements.friendsLeaderboard?.addEventListener("click", handlePlayerStatsNavigationClick);
   elements.opponentsLeaderboard?.addEventListener("click", handlePlayerStatsNavigationClick);
+  elements.statsLeaderboard?.addEventListener("keydown", handleMatchSourcesKeydown);
+  elements.friendsLeaderboard?.addEventListener("keydown", handleMatchSourcesKeydown);
+  elements.opponentsLeaderboard?.addEventListener("keydown", handleMatchSourcesKeydown);
   elements.personalHeadToHead?.addEventListener("click", handlePlayerStatsNavigationClick);
   elements.friendsRivalries?.addEventListener("click", handlePlayerStatsNavigationClick);
   elements.statsHistory?.addEventListener("click", handlePlayerStatsNavigationClick);
@@ -1546,8 +1556,10 @@ function getConsecutiveResultCount(entries, result) {
 
 function buildPlayerProgressContext(userId) {
   const normalizedUserId = normalizeUserId(userId);
-  const personalEntries = matchEntries
-    .filter(entry => normalizeUserId(entry.userId) === normalizedUserId)
+  const personalEntries = dedupePlayerRoundEntries(
+    matchEntries.filter(entry => normalizeUserId(entry.userId) === normalizedUserId),
+    normalizedUserId
+  )
     .sort((left, right) => getMatchActivityTimestamp(right) - getMatchActivityTimestamp(left));
   const profiles = eventProfiles.filter(profile => normalizeUserId(profile.userId) === normalizedUserId);
   const trackedEntries = personalEntries.filter(entry => entry.opponentKind === "tracked" && entry.opponentUserId);
@@ -1630,6 +1642,148 @@ function getPlayerAchievements(userId) {
   return evaluateRuleSet(ACHIEVEMENT_RULES, buildPlayerProgressContext(userId));
 }
 
+function getPlayerRoundKey(entry, userId = entry?.userId) {
+  return `${entry?.eventId || ""}|${Number(entry?.round) || 1}|${normalizeUserId(userId)}`;
+}
+
+function getPreferredPlayerRoundEntry(leftEntry, rightEntry) {
+  if (!leftEntry) {
+    return rightEntry;
+  }
+
+  if (!rightEntry) {
+    return leftEntry;
+  }
+
+  const leftIsTracked = leftEntry.opponentKind === "tracked" && leftEntry.opponentUserId;
+  const rightIsTracked = rightEntry.opponentKind === "tracked" && rightEntry.opponentUserId;
+  if (leftIsTracked !== rightIsTracked) {
+    return rightIsTracked ? rightEntry : leftEntry;
+  }
+
+  return getMatchActivityTimestamp(rightEntry) >= getMatchActivityTimestamp(leftEntry)
+    ? rightEntry
+    : leftEntry;
+}
+
+function dedupePlayerRoundEntries(entries, userId = "") {
+  const map = new Map();
+  entries.forEach(entry => {
+    const ownerId = userId || entry.userId;
+    const key = getPlayerRoundKey(entry, ownerId);
+    map.set(key, getPreferredPlayerRoundEntry(map.get(key), entry));
+  });
+
+  return [...map.values()];
+}
+
+function getTrackedPairKey(leftUserId, rightUserId) {
+  return [normalizeUserId(leftUserId), normalizeUserId(rightUserId)]
+    .sort(compareUserIds)
+    .join("|");
+}
+
+function getTrackedMatchCanonicalKey(entry) {
+  if (!entry || entry.opponentKind !== "tracked" || !entry.opponentUserId) {
+    return "";
+  }
+
+  return `${entry.eventId}|${getTrackedPairKey(entry.userId, entry.opponentUserId)}`;
+}
+
+function getTrackedMatchMirrorSignature(entry) {
+  if (!entry || entry.opponentKind !== "tracked" || !entry.opponentUserId) {
+    return "";
+  }
+
+  const orderedIds = [normalizeUserId(entry.userId), normalizeUserId(entry.opponentUserId)]
+    .sort(compareUserIds);
+  const [playerAId] = orderedIds;
+  const parsedScore = parseScore(entry.score);
+  const isPlayerAReporter = normalizeUserId(entry.userId) === playerAId;
+  const gamesA = isPlayerAReporter ? parsedScore.won : parsedScore.lost;
+  const gamesB = isPlayerAReporter ? parsedScore.lost : parsedScore.won;
+  const winnerId = entry.result === "draw"
+    ? "draw"
+    : entry.result === "win"
+      ? normalizeUserId(entry.userId)
+      : normalizeUserId(entry.opponentUserId);
+
+  return `${winnerId}|${gamesA}-${gamesB}`;
+}
+
+function getNamedOpponentTrackedUser(entry) {
+  if (!entry || entry.opponentKind !== "named" || !entry.opponentName) {
+    return null;
+  }
+
+  return getTrackedUserByName(entry.opponentName, entry.userId);
+}
+
+function getNamedOpponentCanonicalTrackedKey(entry) {
+  const opponentUser = getNamedOpponentTrackedUser(entry);
+  if (!opponentUser) {
+    return "";
+  }
+
+  return `${entry.eventId}|${getTrackedPairKey(entry.userId, opponentUser.id)}`;
+}
+
+function getNamedOpponentMirrorSignature(entry) {
+  const opponentUser = getNamedOpponentTrackedUser(entry);
+  if (!opponentUser) {
+    return "";
+  }
+
+  const reporterId = normalizeUserId(entry.userId);
+  const opponentId = normalizeUserId(opponentUser.id);
+  const orderedIds = [reporterId, opponentId].sort(compareUserIds);
+  const [playerAId] = orderedIds;
+  const parsedScore = parseScore(entry.score);
+  const isPlayerAReporter = reporterId === playerAId;
+  const gamesA = isPlayerAReporter ? parsedScore.won : parsedScore.lost;
+  const gamesB = isPlayerAReporter ? parsedScore.lost : parsedScore.won;
+  const winnerId = entry.result === "draw"
+    ? "draw"
+    : entry.result === "win"
+      ? reporterId
+      : opponentId;
+
+  return `${winnerId}|${gamesA}-${gamesB}`;
+}
+
+function isNamedEntryCoveredByCanonicalTrackedMatch(entry, canonicalTrackedKeys) {
+  const canonicalKey = getNamedOpponentCanonicalTrackedKey(entry);
+  const mirrorSignature = getNamedOpponentMirrorSignature(entry);
+  return Boolean(canonicalKey && mirrorSignature && canonicalTrackedKeys.has(`${canonicalKey}|${mirrorSignature}`));
+}
+
+function getPreferredCanonicalTrackedEntry(leftEntry, rightEntry) {
+  if (!leftEntry) {
+    return rightEntry;
+  }
+
+  if (!rightEntry) {
+    return leftEntry;
+  }
+
+  return getMatchActivityTimestamp(rightEntry) >= getMatchActivityTimestamp(leftEntry)
+    ? rightEntry
+    : leftEntry;
+}
+
+function buildCanonicalTrackedMatchEntries(entries = matchEntries) {
+  const map = new Map();
+  entries
+    .filter(entry => entry.opponentKind === "tracked" && entry.opponentUserId)
+    .forEach(entry => {
+      const key = `${getTrackedMatchCanonicalKey(entry)}|${getTrackedMatchMirrorSignature(entry)}`;
+      map.set(key, getPreferredCanonicalTrackedEntry(map.get(key), entry));
+    });
+
+  return [...map.values()];
+}
+
 function createTrackedMatchPerspective(match, userId) {
   const normalizedUserId = normalizeUserId(userId);
   const isPlayerA = normalizedUserId === match.playerAId;
@@ -1648,28 +1802,44 @@ function createTrackedMatchPerspective(match, userId) {
     opponentUserId,
     opponentName: getUserName(opponentUserId),
     result,
-    score: `${gamesWon}-${gamesLost}`
+    score: `${gamesWon}-${gamesLost}`,
+    sourceMatchId: match.sourceMatchId || "",
+    sourceReporterId: match.sourceReporterId || ""
   };
 }
 
 function getGlobalStatsEntriesForUser(userId, canonicalFriendMatches = buildCanonicalFriendMatches()) {
   const normalizedUserId = normalizeUserId(userId);
+  const canonicalTrackedKeys = new Set(
+    buildCanonicalTrackedMatchEntries()
+      .filter(entry =>
+        normalizeUserId(entry.userId) === normalizedUserId ||
+        normalizeUserId(entry.opponentUserId) === normalizedUserId
+      )
+      .map(entry => `${getTrackedMatchCanonicalKey(entry)}|${getTrackedMatchMirrorSignature(entry)}`)
+  );
   const directUntrackedEntries = matchEntries.filter(entry =>
     normalizeUserId(entry.userId) === normalizedUserId &&
-    !(entry.opponentKind === "tracked" && entry.opponentUserId)
+    !(entry.opponentKind === "tracked" && entry.opponentUserId) &&
+    !isNamedEntryCoveredByCanonicalTrackedMatch(entry, canonicalTrackedKeys)
   );
   const trackedPerspectives = canonicalFriendMatches
     .filter(match => match.playerAId === normalizedUserId || match.playerBId === normalizedUserId)
     .map(match => createTrackedMatchPerspective(match, normalizedUserId));
 
-  return [...directUntrackedEntries, ...trackedPerspectives];
+  return [...dedupePlayerRoundEntries(directUntrackedEntries, normalizedUserId), ...trackedPerspectives];
 }
 
 function getGlobalMatchCount(canonicalFriendMatches = buildCanonicalFriendMatches()) {
-  const untrackedEntries = matchEntries.filter(entry =>
-    !(entry.opponentKind === "tracked" && entry.opponentUserId)
+  const canonicalTrackedKeys = new Set(
+    buildCanonicalTrackedMatchEntries()
+      .map(entry => `${getTrackedMatchCanonicalKey(entry)}|${getTrackedMatchMirrorSignature(entry)}`)
   );
-  return untrackedEntries.length + canonicalFriendMatches.length;
+  const untrackedEntries = matchEntries.filter(entry =>
+    !(entry.opponentKind === "tracked" && entry.opponentUserId) &&
+    !isNamedEntryCoveredByCanonicalTrackedMatch(entry, canonicalTrackedKeys)
+  );
+  return dedupePlayerRoundEntries(untrackedEntries).length + canonicalFriendMatches.length;
 }
 
 function getGlobalLeaderboardRows(activeUsers = users) {
@@ -2095,6 +2265,8 @@ function refreshUserBoundUi() {
     renderGlobalStats();
   } else if (screens.friendsStats.classList.contains("active")) {
     renderFriendsStats();
+  } else if (screens.matchSources.classList.contains("active")) {
+    renderMatchSourcesPage();
   }
 }
 
@@ -2132,6 +2304,19 @@ function createNamedEventParticipantSubject(name, eventId) {
   };
 }
 
+function createMatchSourcesSubject(kind, value, backId = "screen-stats") {
+  const normalizedKind = ["global", "friends", "opponent"].includes(kind) ? kind : "";
+  if (!normalizedKind) {
+    return null;
+  }
+
+  return {
+    kind: normalizedKind,
+    value: normalizedKind === "opponent" ? String(value || "").trim() : normalizeUserId(value),
+    backId
+  };
+}
+
 function getViewedPersonalStatsSubject() {
   if (viewedPersonalStatsSubject?.kind === "tracked") {
     const normalizedViewedUserId = normalizeUserId(viewedPersonalStatsSubject.userId);
@@ -2165,6 +2350,14 @@ function cloneViewedEventParticipantSubject(subject) {
   }
 
   return null;
+}
+
+function cloneViewedMatchSourcesSubject(subject) {
+  if (!subject || typeof subject !== "object") {
+    return null;
+  }
+
+  return createMatchSourcesSubject(subject.kind, subject.value, subject.backId || "screen-stats");
 }
 
 function getFriendlyAuthError(error) {
@@ -3660,11 +3853,13 @@ function createNavigationState(screenId = getActiveScreenId()) {
     currentSelectedRound,
     viewedPersonalStatsSubject: cloneViewedPersonalStatsSubject(viewedPersonalStatsSubject),
     viewedEventParticipantSubject: cloneViewedEventParticipantSubject(viewedEventParticipantSubject),
+    viewedMatchSourcesSubject: cloneViewedMatchSourcesSubject(viewedMatchSourcesSubject),
     statsBackId: elements.statsBackButton?.dataset.back || "screen-start",
     friendsBackId: elements.friendsStatsBackButton?.dataset.back || "screen-start",
     opponentsBackId: elements.opponentsStatsBackButton?.dataset.back || "screen-start",
     personalBackId: elements.personalStatsBackButton?.dataset.back || "screen-start",
-    eventPlayerBackId: elements.eventPlayerStatsBackButton?.dataset.back || "screen-date"
+    eventPlayerBackId: elements.eventPlayerStatsBackButton?.dataset.back || "screen-date",
+    matchSourcesBackId: elements.matchSourcesBackButton?.dataset.back || "screen-stats"
   };
 }
 
@@ -3684,6 +3879,7 @@ function applyNavigationState(state) {
   currentSelectedRound = Number.isInteger(nextState.currentSelectedRound) ? nextState.currentSelectedRound : Number(nextState.currentSelectedRound) || 1;
   viewedPersonalStatsSubject = cloneViewedPersonalStatsSubject(nextState.viewedPersonalStatsSubject) || createTrackedPersonalStatsSubject(activeUserId);
   viewedEventParticipantSubject = cloneViewedEventParticipantSubject(nextState.viewedEventParticipantSubject);
+  viewedMatchSourcesSubject = cloneViewedMatchSourcesSubject(nextState.viewedMatchSourcesSubject);
 
   if (elements.matchBackButton) {
     elements.matchBackButton.dataset.back = currentMatchBack;
@@ -3702,6 +3898,9 @@ function applyNavigationState(state) {
   }
   if (elements.eventPlayerStatsBackButton) {
     elements.eventPlayerStatsBackButton.dataset.back = nextState.eventPlayerBackId || "screen-date";
+  }
+  if (elements.matchSourcesBackButton) {
+    elements.matchSourcesBackButton.dataset.back = nextState.matchSourcesBackId || "screen-stats";
   }
 
   switch (nextState.screenId) {
@@ -3755,6 +3954,14 @@ function applyNavigationState(state) {
         showScreen("eventPlayerStats");
       } else {
         showScreen("date");
+      }
+      return;
+    case "screen-match-sources":
+      if (ensureAuthenticatedSilently() && viewedMatchSourcesSubject) {
+        renderMatchSourcesPage();
+        showScreen("matchSources");
+      } else {
+        showScreen("stats");
       }
       return;
     case "screen-start":
@@ -4395,11 +4602,14 @@ function updateMatchActionButton() {
 }
 
 function getMatchForCurrentRound() {
-  return matchEntries.find(entry =>
-    entry.eventId === currentEventId &&
-    entry.userId === activeUserId &&
-    entry.round === currentSelectedRound
-  ) || null;
+  return dedupePlayerRoundEntries(
+    matchEntries.filter(entry =>
+      entry.eventId === currentEventId &&
+      normalizeUserId(entry.userId) === activeUserId &&
+      entry.round === currentSelectedRound
+    ),
+    activeUserId
+  )[0] || null;
 }
 
 function getOpponentSelectValue(matchEntry) {
@@ -4536,6 +4746,22 @@ function openEventParticipantStatsForOpponent(name, eventId, backId = "screen-da
   syncNavigationHistory("push", "screen-event-player-stats");
 }
 
+function openMatchSources(kind, value, backId = getActiveScreenId()) {
+  if (!ensureAuthenticatedForApp()) {
+    return;
+  }
+
+  viewedMatchSourcesSubject = createMatchSourcesSubject(kind, value, backId);
+  if (!viewedMatchSourcesSubject) {
+    return;
+  }
+
+  elements.matchSourcesBackButton.dataset.back = viewedMatchSourcesSubject.backId;
+  renderMatchSourcesPage();
+  showScreen("matchSources");
+  syncNavigationHistory("push", "screen-match-sources");
+}
+
 function renderEventParticipantStatsPage() {
   const subject = cloneViewedEventParticipantSubject(viewedEventParticipantSubject);
   const event = events.find(item => item.id === subject?.eventId);
@@ -4555,11 +4781,119 @@ function renderEventParticipantStatsPage() {
   renderNamedEventParticipantStats(subject.name, event, eventLabel);
 }
 
+function getMatchSourcesData(subject) {
+  if (!subject) {
+    return null;
+  }
+
+  if (subject.kind === "global") {
+    const userId = normalizeUserId(subject.value);
+    const entries = getGlobalStatsEntriesForUser(userId);
+    const stats = computeEntryStats(entries);
+    return {
+      title: `${getUserName(userId)} global sources`,
+      subtitle: "Matches behind this global leaderboard row.",
+      summaryLabel: `${stats.wins}-${stats.losses}-${stats.draws} overall`,
+      stats,
+      entries,
+      perspective: "player"
+    };
+  }
+
+  if (subject.kind === "friends") {
+    const userId = normalizeUserId(subject.value);
+    const entries = buildCanonicalFriendMatches()
+      .filter(match => match.playerAId === userId || match.playerBId === userId)
+      .map(match => createTrackedMatchPerspective(match, userId));
+    const stats = computeEntryStats(entries);
+    return {
+      title: `${getUserName(userId)} friend sources`,
+      subtitle: "Tracked-friend matches behind this friends leaderboard row.",
+      summaryLabel: `${stats.wins}-${stats.losses}-${stats.draws} vs tracked friends`,
+      stats,
+      entries,
+      perspective: "player"
+    };
+  }
+
+  if (subject.kind === "opponent") {
+    const opponentName = String(subject.value || "").trim();
+    const entries = getNamedOpponentEntries(opponentName);
+    const stats = computeOpponentPerspectiveStats(entries);
+    return {
+      title: `${opponentName} opponent sources`,
+      subtitle: "Logged matches behind this opponent leaderboard row.",
+      summaryLabel: `${stats.wins}-${stats.losses}-${stats.draws} vs tracked players`,
+      stats,
+      entries,
+      perspective: "opponent"
+    };
+  }
+
+  return null;
+}
+
+function renderMatchSourcesPage() {
+  const subject = cloneViewedMatchSourcesSubject(viewedMatchSourcesSubject);
+  const data = getMatchSourcesData(subject);
+
+  if (!data) {
+    elements.matchSourcesTitle.textContent = "Source matches";
+    elements.matchSourcesSubtitle.textContent = "No source data available.";
+    elements.matchSourcesSummary.innerHTML = '<div class="empty-state">No summary available.</div>';
+    elements.matchSourcesList.innerHTML = "";
+    return;
+  }
+
+  const sortedEntries = [...data.entries].sort((left, right) =>
+    getMatchActivityTimestamp(right) - getMatchActivityTimestamp(left) ||
+    Number(right.round || 0) - Number(left.round || 0)
+  );
+
+  elements.matchSourcesTitle.textContent = data.title;
+  elements.matchSourcesSubtitle.textContent = data.subtitle;
+  elements.matchSourcesSummary.innerHTML = createListCard("Shown stats", data.summaryLabel, [
+    `Match win rate: ${formatPercent(data.stats.matchWinRate)}`,
+    `Game win rate: ${formatPercent(data.stats.gameWinRate)}`,
+    `Matches: ${data.stats.matches}`
+  ]);
+  elements.matchSourcesList.innerHTML = sortedEntries.length
+    ? sortedEntries.map(entry => renderMatchSourceCard(entry, data.perspective)).join("")
+    : '<div class="empty-state">No source matches found for this row.</div>';
+}
+
+function renderMatchSourceCard(entry, perspective = "player") {
+  const event = events.find(item => item.id === entry.eventId);
+  const eventLabel = event
+    ? `${formatDate(event.date)} - ${formatCompactEventLabel(event)}`
+    : "Unknown event";
+  const sourceReporterId = normalizeUserId(entry.sourceReporterId || entry.userId);
+  const resultLabel = perspective === "opponent"
+    ? `${getMirroredScore(entry.score) || "0-0"} ${getResultVerb(getMirroredMatchResult(entry.result))}`
+    : describeMatchResult(entry);
+  const opponentLabel = perspective === "opponent"
+    ? `Opponent: ${getUserName(entry.userId)}`
+    : `Opponent: ${getOpponentDisplayName(entry)}`;
+
+  return createListCard(
+    escapeHtml(eventLabel),
+    escapeHtml(`Round ${entry.round} - ${resultLabel}`),
+    [
+      escapeHtml(opponentLabel),
+      escapeHtml(`Reported by: ${getUserName(sourceReporterId)}`),
+      entry.notes ? escapeHtml(`Notes: ${entry.notes}`) : ""
+    ].filter(Boolean)
+  );
+}
+
 function renderTrackedEventParticipantStats(userId, event, eventLabel) {
-  const entries = matchEntries
-    .filter(entry => entry.eventId === event.id && normalizeUserId(entry.userId) === normalizeUserId(userId))
+  const normalizedUserId = normalizeUserId(userId);
+  const entries = dedupePlayerRoundEntries(
+    matchEntries.filter(entry => entry.eventId === event.id && normalizeUserId(entry.userId) === normalizedUserId),
+    normalizedUserId
+  )
     .sort((left, right) => left.round - right.round);
-  const profile = eventProfiles.find(item => item.eventId === event.id && normalizeUserId(item.userId) === normalizeUserId(userId));
+  const profile = eventProfiles.find(item => item.eventId === event.id && normalizeUserId(item.userId) === normalizedUserId);
   const stats = computeEntryStats(entries);
   const playerName = getUserName(userId);
 
@@ -4676,7 +5010,10 @@ function renderPersonalStatsPage() {
   }
 
   const userId = subject.userId;
-  const personalEntries = matchEntries.filter(entry => entry.userId === userId);
+  const personalEntries = dedupePlayerRoundEntries(
+    matchEntries.filter(entry => normalizeUserId(entry.userId) === userId),
+    userId
+  );
   const canonicalFriendMatches = buildCanonicalFriendMatches();
   const isOwnStats = userId === activeUserId;
   const playerName = getUserName(userId);
@@ -4818,6 +5155,8 @@ function renderGlobalLeaderboardStats() {
         `Matches: ${allStats.matches}`
       ],
       {
+        className: "is-clickable",
+        dataAttributes: ` role="button" tabindex="0" data-match-sources-kind="global" data-match-sources-user="${escapeHtml(user.id)}" data-match-sources-back="screen-stats"`,
         titleHtml: renderLeaderboardTitle(user.id, index + 1, "screen-stats")
       }
     )
@@ -4890,6 +5229,8 @@ function renderFriendsLeaderboardStats(canonicalFriendMatches) {
         `Games: ${row.matches}`
       ],
       {
+        className: "is-clickable",
+        dataAttributes: ` role="button" tabindex="0" data-match-sources-kind="friends" data-match-sources-user="${escapeHtml(row.userId)}" data-match-sources-back="screen-friends-stats"`,
         titleHtml: renderLeaderboardTitle(row.userId, index + 1, "screen-friends-stats")
       }
     )
@@ -4930,6 +5271,8 @@ function renderOpponentsLeaderboardStats(rows) {
         `Matches: ${row.matches}`
       ],
       {
+        className: "is-clickable",
+        dataAttributes: ` role="button" tabindex="0" data-match-sources-kind="opponent" data-match-sources-opponent="${escapeHtml(row.name)}" data-match-sources-back="screen-opponents-stats"`,
         titleHtml: renderOpponentLeaderboardTitle(row.name, index + 1, "screen-opponents-stats")
       }
     )
@@ -5107,13 +5450,12 @@ function renderPersonalHistoryToTarget(userId, personalEntries, targetElement) {
 
 function buildCanonicalFriendMatches() {
   const map = new Map();
-  matchEntries
-    .filter(entry => entry.opponentKind === "tracked" && entry.opponentUserId)
+  buildCanonicalTrackedMatchEntries()
     .forEach(entry => {
       const orderedIds = [normalizeUserId(entry.userId), normalizeUserId(entry.opponentUserId)]
         .sort(compareUserIds);
       const [playerAId, playerBId] = orderedIds;
-      const key = `${entry.eventId}|${entry.round}|${playerAId}|${playerBId}`;
+      const key = `${entry.eventId}|${getTrackedPairKey(playerAId, playerBId)}|${getTrackedMatchMirrorSignature(entry)}`;
       if (map.has(key)) {
         return;
       }
@@ -5127,7 +5469,9 @@ function buildCanonicalFriendMatches() {
         playerBId,
         winnerId: entry.result === "draw" ? null : entry.result === "win" ? entry.userId : entry.opponentUserId,
         gamesA: isPlayerAReporter ? parsedScore.won : parsedScore.lost,
-        gamesB: isPlayerAReporter ? parsedScore.lost : parsedScore.won
+        gamesB: isPlayerAReporter ? parsedScore.lost : parsedScore.won,
+        sourceMatchId: entry.id || "",
+        sourceReporterId: normalizeUserId(entry.userId)
       });
     });
 
@@ -5828,35 +6172,76 @@ function removeMatch(matchId) {
 
 function handlePlayerStatsNavigationClick(event) {
   const trigger = event.target.closest("[data-event-player-user], [data-event-player-opponent], [data-personal-stats-user], [data-personal-stats-opponent]");
+  if (trigger) {
+    const eventBackId = trigger.dataset.eventPlayerBack || "screen-date";
+    if (trigger.dataset.eventPlayerUser && trigger.dataset.eventPlayerEvent) {
+      openEventParticipantStatsForUser(trigger.dataset.eventPlayerUser, trigger.dataset.eventPlayerEvent, eventBackId);
+      return;
+    }
+
+    if (trigger.dataset.eventPlayerOpponent && trigger.dataset.eventPlayerEvent) {
+      openEventParticipantStatsForOpponent(trigger.dataset.eventPlayerOpponent, trigger.dataset.eventPlayerEvent, eventBackId);
+      return;
+    }
+
+    const backId = trigger.dataset.personalStatsBack || "screen-start";
+    if (trigger.dataset.personalStatsUser) {
+      openPersonalStatsForUser(trigger.dataset.personalStatsUser, backId);
+      return;
+    }
+
+    if (trigger.dataset.personalStatsOpponent) {
+      openPersonalStatsForOpponent(trigger.dataset.personalStatsOpponent, backId);
+      return;
+    }
+  }
+
+  handleMatchSourcesNavigationClick(event);
+}
+
+function handleMatchSourcesNavigationClick(event) {
+  if (event.target.closest("[data-event-player-user], [data-event-player-opponent], [data-personal-stats-user], [data-personal-stats-opponent]")) {
+    return;
+  }
+
+  const trigger = event.target.closest("[data-match-sources-kind]");
   if (!trigger) {
     return;
   }
 
-  const eventBackId = trigger.dataset.eventPlayerBack || "screen-date";
-  if (trigger.dataset.eventPlayerUser && trigger.dataset.eventPlayerEvent) {
-    openEventParticipantStatsForUser(trigger.dataset.eventPlayerUser, trigger.dataset.eventPlayerEvent, eventBackId);
+  const kind = trigger.dataset.matchSourcesKind || "";
+  const value = kind === "opponent"
+    ? trigger.dataset.matchSourcesOpponent
+    : trigger.dataset.matchSourcesUser;
+  if (!value) {
     return;
   }
 
-  if (trigger.dataset.eventPlayerOpponent && trigger.dataset.eventPlayerEvent) {
-    openEventParticipantStatsForOpponent(trigger.dataset.eventPlayerOpponent, trigger.dataset.eventPlayerEvent, eventBackId);
+  openMatchSources(kind, value, trigger.dataset.matchSourcesBack || getActiveScreenId());
+}
+
+function handleMatchSourcesKeydown(event) {
+  if (event.key !== "Enter" && event.key !== " ") {
     return;
   }
 
-  const backId = trigger.dataset.personalStatsBack || "screen-start";
-  if (trigger.dataset.personalStatsUser) {
-    openPersonalStatsForUser(trigger.dataset.personalStatsUser, backId);
+  if (event.target.closest("[data-event-player-user], [data-event-player-opponent], [data-personal-stats-user], [data-personal-stats-opponent]")) {
     return;
   }
 
-  if (trigger.dataset.personalStatsOpponent) {
-    openPersonalStatsForOpponent(trigger.dataset.personalStatsOpponent, backId);
+  if (!event.target.closest("[data-match-sources-kind]")) {
+    return;
   }
+
+  event.preventDefault();
+  handleMatchSourcesNavigationClick(event);
 }
 
 function getMatchesForCurrentPlayerEvent() {
-  return matchEntries
-    .filter(entry => entry.eventId === currentEventId && entry.userId === activeUserId)
+  return dedupePlayerRoundEntries(
+    matchEntries.filter(entry => entry.eventId === currentEventId && normalizeUserId(entry.userId) === activeUserId),
+    activeUserId
+  )
     .sort((left, right) => left.round - right.round);
 }
 
