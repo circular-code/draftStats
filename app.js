@@ -35,6 +35,7 @@ const seededSetCatalog = [
 
 const seededSetColors = new Map(seededSetCatalog.map(set => [set.code, set.color]));
 const neutralSetColor = "linear-gradient(135deg, #64748b, #94a3b8)";
+const globalLeaderboardMinimumMatches = 10;
 const formatColors = {
   Draft: "linear-gradient(135deg, #ff7a18, #ffb347)",
   Sealed: "linear-gradient(135deg, #00a896, #7dd3fc)",
@@ -1854,7 +1855,7 @@ function getGlobalLeaderboardRows(activeUsers = users) {
       const friendStats = computeEntryStats(friendEntries);
       return { user, allStats, friendStats };
     })
-    .filter(row => row.allStats.matches > 0)
+    .filter(row => row.allStats.matches >= globalLeaderboardMinimumMatches)
     .sort((left, right) =>
       right.allStats.matchWinRate - left.allStats.matchWinRate ||
       right.allStats.matches - left.allStats.matches ||
@@ -5165,7 +5166,7 @@ function renderGlobalLeaderboardStats() {
   const rows = getGlobalLeaderboardRows();
 
   if (!rows.length) {
-    elements.statsLeaderboard.innerHTML = '<div class="empty-state">No group data yet. Log some matches first.</div>';
+    elements.statsLeaderboard.innerHTML = `<div class="empty-state">No players with ${globalLeaderboardMinimumMatches}+ matches yet.</div>`;
     return;
   }
 
